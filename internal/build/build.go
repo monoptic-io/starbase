@@ -12,15 +12,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monoptic-io/starbase/internal/assets"
 	"github.com/monoptic-io/starbase/internal/cache"
 	"github.com/monoptic-io/starbase/internal/claim"
+	"github.com/monoptic-io/starbase/internal/evidence"
 	"github.com/monoptic-io/starbase/internal/graph"
 	"github.com/monoptic-io/starbase/internal/model"
 	"github.com/monoptic-io/starbase/internal/parse"
@@ -45,6 +49,8 @@ type Result struct {
 	Topics      int
 	Rendered    int
 	Skipped     int
+	Verified    int // claims re-executed and matched
+	Attested    int // claims with evidence attached but no re-runnable check
 	Diagnostics []model.Diagnostic
 }
 
@@ -125,6 +131,139 @@ func Catalog(cfg Config) ([]tmpl.Catalog, error) {
 		return nil, err
 	}
 	return eng.Catalogs(), nil
+}
+
+// Verify re-executes the content directory's evidence/ Go program and diffs each
+// claim's embedded evidence against the freshly computed result. Mismatches are
+// errors, so verify can gate CI: a fabricated number breaks the build. Claims
+// without a `check` are "attested" by their author and are not re-run.
+func Verify(cfg Config) (Result, error) {
+	topics, _, _, diags, err := index(cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	res := Result{Topics: len(topics), Diagnostics: diags}
+
+	checks, present, rerr := evidence.Run(cfg.ContentDir, 120*time.Second)
+	if rerr != nil {
+		res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
+			Severity: model.SevError, File: "evidence", Message: rerr.Error()})
+		res.Diagnostics = dedupeDiags(res.Diagnostics)
+		return res, nil
+	}
+
+	for _, t := range topics {
+		for _, sc := range t.Shortcodes {
+			if sc.Name != "claim" {
+				continue
+			}
+			info := claim.Parse(sc)
+			if info.Check == "" {
+				if info.HasImpl || info.Source != "" {
+					res.Attested++
+				}
+				continue
+			}
+			err := func() string {
+				if !present {
+					return fmt.Sprintf("claim references check %q but there is no evidence/ program", info.Check)
+				}
+				ck, ok := checks[info.Check]
+				if !ok {
+					return fmt.Sprintf("evidence program produced no result named %q", info.Check)
+				}
+				if ck.Error != "" {
+					return fmt.Sprintf("check %q errored: %s", info.Check, ck.Error)
+				}
+				return compareClaim(info, ck)
+			}()
+			if err != "" {
+				res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
+					Severity: model.SevError, File: t.SourcePath, Line: sc.Line, Message: err})
+			} else {
+				res.Verified++
+			}
+		}
+	}
+	res.Diagnostics = dedupeDiags(res.Diagnostics)
+	return res, nil
+}
+
+// compareClaim returns "" if the claim's embedded evidence matches the computed
+// result, else a description of the discrepancy.
+func compareClaim(info claim.Info, ck evidence.Check) string {
+	embRows := claim.Rows(info.Result, info.ResultFmt)
+	if len(ck.Table) > 0 && len(embRows) > 0 {
+		if !tableEqual(embRows, ck.Table) {
+			return fmt.Sprintf("claim check %q: the result table does not match the computed output", info.Check)
+		}
+	} else {
+		prod := firstNonEmpty(ck.Value, scalarOf(ck.Table))
+		emb := firstNonEmpty(info.Value, claim.Scalar(info.Result))
+		if prod != "" && emb != "" && !valueEqual(prod, emb) {
+			return fmt.Sprintf("claim check %q: the article says %q but the computation produced %q", info.Check, emb, prod)
+		}
+	}
+	if info.Value != "" {
+		if prod := firstNonEmpty(ck.Value, scalarOf(ck.Table)); prod != "" && !valueEqual(prod, info.Value) {
+			return fmt.Sprintf("claim value %q does not match the computed value %q", info.Value, prod)
+		}
+	}
+	return ""
+}
+
+func scalarOf(t [][]string) string {
+	if len(t) == 0 {
+		return ""
+	}
+	last := t[len(t)-1]
+	if len(last) == 1 && len(t) <= 2 {
+		return strings.TrimSpace(last[0])
+	}
+	return ""
+}
+
+func valueEqual(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if strings.EqualFold(a, b) {
+		return true
+	}
+	fa, ea := parseNum(a)
+	fb, eb := parseNum(b)
+	if ea == nil && eb == nil {
+		return math.Abs(fa-fb) <= 1e-9*math.Max(1, math.Abs(fa))
+	}
+	return false
+}
+
+func parseNum(s string) (float64, error) {
+	return strconv.ParseFloat(strings.NewReplacer(",", "", "$", "", " ", "", "%", "").Replace(s), 64)
+}
+
+func tableEqual(a, b [][]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if len(a[i]) != len(b[i]) {
+			return false
+		}
+		for j := range a[i] {
+			if !valueEqual(a[i][j], b[i][j]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // Check performs fast validation only.

@@ -31,6 +31,8 @@ func main() {
 		os.Exit(runBuild(os.Args[2:]))
 	case "check":
 		os.Exit(runCheck(os.Args[2:]))
+	case "verify":
+		os.Exit(runVerify(os.Args[2:]))
 	case "templates":
 		os.Exit(runTemplates(os.Args[2:]))
 	case "help", "-h", "--help":
@@ -48,6 +50,8 @@ func usage() {
 Commands:
   build <content-dir>   Generate the static site (incremental).
   check <content-dir>   Fast validation: report dead links and bad template calls.
+  verify <content-dir>  Re-run the evidence/ program and diff every claim's
+                        embedded result against the freshly computed output.
   templates [dir]       List available shortcode templates and their arguments.
 
 Run "starbase build -h" or "starbase check -h" for flags.
@@ -167,6 +171,26 @@ func reorder(args []string) []string {
 		pos = append(pos, a)
 	}
 	return append(flags, pos...)
+}
+
+func runVerify(args []string) int {
+	fs := flag.NewFlagSet("verify", flag.ExitOnError)
+	drafts := fs.Bool("drafts", false, "include draft topics")
+	fs.Parse(reorder(args))
+
+	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, OutDir: "_site"}
+	res, err := build.Verify(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
+		return 1
+	}
+	printDiagnostics(res.Diagnostics)
+	fmt.Printf("verified %d claim(s), %d attested (not re-run): %d error(s)\n",
+		res.Verified, res.Attested, res.Errors())
+	if res.Errors() > 0 {
+		return 1
+	}
+	return 0
 }
 
 func contentDir(fs *flag.FlagSet) string {

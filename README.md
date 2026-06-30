@@ -30,6 +30,7 @@ go build -o starbase ./cmd/starbase
 
 ```sh
 starbase check <dir>                 # fast validation: dead links + bad template calls
+starbase verify <dir>                # re-run the evidence/ program, diff every checked claim
 starbase build <dir> -o _site \      # full incremental render
         -title "My KB"
 starbase templates [dir]             # list embedded templates and their arguments
@@ -87,11 +88,20 @@ sandbox, plus the captured result — rendered inline with a *How we know this*
 disclosure so a reader can dig down to how a number was derived. starbase
 executes nothing; it surfaces what the agent computed.
 
-`check` flags a claim with no implementation or source as an **unsupported
-claim** — the same coordination signal as a dead link: one agent asserts, the
-warning tells the swarm to go find the evidence (or correct the value). A finished
-research KB has no dead links *and* no unsupported claims. See the
-`research-claims` skill.
+`check` flags a claim with no evidence as an **unsupported claim** — the same
+coordination signal as a dead link: one agent asserts, the warning tells the swarm
+to go find the evidence (or correct the value).
+
+To make a number **un-fakeable**, bind a claim to a `check` and drop a Go program
+in `evidence/` that recomputes it (pure Go, or shelling out to DuckDB, a SQL
+driver, an API — whatever). `starbase verify` compiles and runs that program — the
+same way `go test` builds and runs tests — and **diffs every checked claim against
+the freshly computed result, failing the build on a mismatch.** The build, not the
+author, is the trust anchor: a fabricated value breaks CI. starbase ships no
+runners — the agent's Go does the work; starbase just builds, runs, and compares.
+So claims sort into **unsupported → attested → verified**, and a finished research
+KB drives load-bearing numbers to *verified*. See `examples/sales-research/` and
+the `research-claims` skill.
 
 ## Third-party assets & offline builds
 
@@ -115,9 +125,10 @@ starbase build site -o _site --vendor --offline   # cache only, no network
 
 `.github/workflows/` contains two workflows:
 
-- **ci.yml** (pull requests): builds, vets, tests, and runs
-  `starbase check demo -strict` — validating the demo's links and template
-  calls *without* rendering it.
+- **ci.yml** (pull requests): builds, vets, tests, runs `starbase check demo
+  -strict` (validating links and template calls *without* rendering), and
+  `starbase verify examples/sales-research` (re-running the evidence program to
+  confirm every checked claim still matches the data).
 - **pages.yml** (push to `main`): renders the demo and publishes it to GitHub
   Pages.
 
@@ -135,7 +146,7 @@ build      per-page fingerprints drive incremental rendering;
 ```
 
 The `internal/` packages are small and single-purpose
-(`model`, `parse`, `registry`, `graph`, `tmpl`, `claim`, `render`, `cache`,
+(`model`, `parse`, `registry`, `graph`, `tmpl`, `claim`, `evidence`, `render`, `cache`,
 `vendor`, `build`).
 
 ## Skills

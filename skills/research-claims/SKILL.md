@@ -44,6 +44,35 @@ regions
 - Args: `value` (the asserted value — checked against the result), `source`
   (the dataset/notebook/file), `asof` (when you ran it).
 
+## Verifiable claims (don't make the reader trust you)
+
+Pasting a result is *attested* evidence — the reader has to trust you transcribed
+it faithfully. To make a number **un-fakeable**, bind the claim to a `check` and
+write a program that recomputes it. `starbase verify` re-runs the program at build
+time and **fails if the article and the computation disagree** — so the build, not
+the author, is the source of truth.
+
+Put a Go `main` package in `evidence/` (its own module). It can do anything —
+pure Go, or shell out to DuckDB, a SQL driver, an API — and prints a JSON object
+keyed by check name:
+
+```json
+{ "midwest-regions": { "value": "4" },
+  "revenue-by-division": { "table": [["division","total"],["Midwest","11400000"]] } }
+```
+
+Then bind the claim with `check="midwest-regions"`. `verify` compares the
+claim's embedded `value`/result to the computed one (numbers are compared
+numerically, so `11,400,000` matches `11400000`).
+
+```sh
+starbase verify <dir>   # re-runs evidence/, diffs every checked claim; exits 1 on mismatch
+```
+
+Wire `verify` into CI. A claim with a `check` that re-executes and matches is
+**verified**; one with only a pasted result is **attested**; one with neither is
+**unsupported**. Aim to make load-bearing numbers verified.
+
 ## The validation loop (this is the point)
 
 `starbase check` treats a claim with **no implementation and no source** as an

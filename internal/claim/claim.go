@@ -26,6 +26,7 @@ type Info struct {
 	ResultFmt string // "result" | "csv" | "tsv" | "table" | ...
 	Source    string // dataset / notebook / file the computation ran against
 	AsOf      string // when the computation was run
+	Check     string // name of an evidence-program result to verify against
 }
 
 // Parse pulls a claim apart. Inside the shortcode body, the first non-result
@@ -36,6 +37,7 @@ func Parse(sc model.Shortcode) Info {
 		Value:  strings.TrimSpace(sc.Args["value"]),
 		Source: strings.TrimSpace(sc.Args["source"]),
 		AsOf:   strings.TrimSpace(sc.Args["asof"]),
+		Check:  strings.TrimSpace(sc.Args["check"]),
 	}
 	prose, fences := splitFences(sc.Inner)
 	for _, f := range fences {
@@ -58,10 +60,10 @@ func Parse(sc model.Shortcode) Info {
 // Validate surfaces the research-loop diagnostics for a claim.
 func Validate(in Info, file string, line int) []model.Diagnostic {
 	var diags []model.Diagnostic
-	if !in.HasImpl && in.Source == "" {
+	if !in.HasImpl && in.Source == "" && in.Check == "" {
 		diags = append(diags, model.Diagnostic{
 			Severity: model.SevWarn, File: file, Line: line,
-			Message: "unsupported claim: attach an implementation (a code/query block) or a source",
+			Message: "unsupported claim: attach an implementation, a source, or a check",
 		})
 	}
 	if in.Value != "" && in.Result != "" {
