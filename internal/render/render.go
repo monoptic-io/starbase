@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/monoptic-io/starbase/internal/claim"
 	"github.com/monoptic-io/starbase/internal/graph"
 	"github.com/monoptic-io/starbase/internal/model"
 	"github.com/monoptic-io/starbase/internal/parse"
@@ -222,6 +223,12 @@ func (r *Renderer) renderBody(t *model.Topic, body string, depth int) (string, m
 	if depth < 4 {
 		for i, sc := range parse.ScanShortcodes(body) {
 			id := fmt.Sprintf("sg-%s-%d-%d", sanitizeID(t.Slug), depth, i)
+			if sc.Name == "claim" {
+				out, ds := r.renderClaim(t, sc, id, depth)
+				diags = append(diags, ds...)
+				segs = append(segs, segment{sc.Start, sc.End, 3, out})
+				continue
+			}
 			innerHTML := ""
 			if sc.Inner != "" && !r.eng.RawInner(sc.Name) {
 				ip, ir, _, id2 := r.renderBody(t, sc.Inner, depth+1)
@@ -266,6 +273,89 @@ func (r *Renderer) renderBody(t *model.Topic, body string, depth int) (string, m
 		diags = append(diags, model.Diagnostic{Severity: model.SevError, File: t.SourcePath, Message: err.Error()})
 	}
 	return out.String(), repl, headings, diags
+}
+
+// renderClaim turns a {{< claim >}} into prose with an evidence disclosure:
+// the result and the implementation (verbatim) the agent computed, so a reader
+// can dig down to how a value was derived. starbase runs nothing — it surfaces.
+func (r *Renderer) renderClaim(t *model.Topic, sc model.Shortcode, id string, depth int) (template.HTML, []model.Diagnostic) {
+	info := claim.Parse(sc)
+	pp, pr, _, diags := r.renderBody(t, info.Prose, depth+1)
+	proseHTML := stripOuterP(substitute(pp, pr))
+
+	var b strings.Builder
+	b.WriteString(`<div class="sg-claim">`)
+	b.WriteString(`<div class="sg-claim-text">` + proseHTML)
+	if info.HasImpl || info.Source != "" {
+		b.WriteString(` <span class="sg-claim-badge" title="evidence attached">evidence</span>`)
+	} else {
+		b.WriteString(` <span class="sg-claim-badge sg-claim-unsupported" title="no evidence yet">unsupported</span>`)
+	}
+	b.WriteString(`</div>`)
+
+	if info.HasImpl || info.Source != "" || info.Result != "" {
+		b.WriteString(`<details class="sg-evidence"><summary>How we know this</summary>`)
+		var meta []string
+		if info.Value != "" {
+			meta = append(meta, "value <b>"+html.EscapeString(info.Value)+"</b>")
+		}
+		if info.Source != "" {
+			meta = append(meta, "source <code>"+html.EscapeString(info.Source)+"</code>")
+		}
+		if info.AsOf != "" {
+			meta = append(meta, "as of "+html.EscapeString(info.AsOf))
+		}
+		if len(meta) > 0 {
+			b.WriteString(`<div class="sg-ev-meta">` + strings.Join(meta, " · ") + `</div>`)
+		}
+		if info.Result != "" {
+			b.WriteString(claimResultHTML(info))
+		}
+		if info.HasImpl {
+			lang := info.Lang
+			if lang == "" {
+				lang = "text"
+			}
+			b.WriteString(`<pre class="sg-ev-code"><code class="language-` +
+				html.EscapeString(lang) + `">` + html.EscapeString(info.Code) + `</code></pre>`)
+		}
+		b.WriteString(`</details>`)
+	}
+	b.WriteString(`</div>`)
+	return template.HTML(b.String()), diags
+}
+
+func claimResultHTML(info claim.Info) string {
+	rows := claim.Rows(info.Result, info.ResultFmt)
+	if len(rows) == 0 {
+		return ""
+	}
+	if len(rows) == 1 && len(rows[0]) == 1 {
+		return `<div class="sg-ev-result">= <b>` + html.EscapeString(rows[0][0]) + `</b></div>`
+	}
+	var b strings.Builder
+	b.WriteString(`<table class="sg-ev-table">`)
+	for ri, row := range rows {
+		b.WriteString("<tr>")
+		tag := "td"
+		if ri == 0 {
+			tag = "th"
+		}
+		for _, cell := range row {
+			b.WriteString("<" + tag + ">" + html.EscapeString(cell) + "</" + tag + ">")
+		}
+		b.WriteString("</tr>")
+	}
+	b.WriteString("</table>")
+	return b.String()
+}
+
+func stripOuterP(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "<p>") && strings.HasSuffix(s, "</p>") && strings.Count(s, "<p>") == 1 {
+		return s[3 : len(s)-4]
+	}
+	return s
 }
 
 func substitute(htmlStr string, repl map[string]template.HTML) string {

@@ -79,6 +79,20 @@ templates), `layout/` (override the page layout), and `theme/` (override
 `theme.css` / `app.js`). Built-ins are embedded in the binary; project files
 shadow them by name.
 
+## Evidence-backed claims
+
+For research/analysis KBs, a `{{< claim >}}` shortcode ties a statement to the
+computation that produced it — the query/script the authoring agent ran in its
+sandbox, plus the captured result — rendered inline with a *How we know this*
+disclosure so a reader can dig down to how a number was derived. starbase
+executes nothing; it surfaces what the agent computed.
+
+`check` flags a claim with no implementation or source as an **unsupported
+claim** — the same coordination signal as a dead link: one agent asserts, the
+warning tells the swarm to go find the evidence (or correct the value). A finished
+research KB has no dead links *and* no unsupported claims. See the
+`research-claims` skill.
+
 ## Third-party assets & offline builds
 
 starbase ships no third-party front-end code in its repository. By default a
@@ -121,12 +135,13 @@ build      per-page fingerprints drive incremental rendering;
 ```
 
 The `internal/` packages are small and single-purpose
-(`model`, `parse`, `registry`, `graph`, `tmpl`, `render`, `cache`, `vendor`, `build`).
+(`model`, `parse`, `registry`, `graph`, `tmpl`, `claim`, `render`, `cache`,
+`vendor`, `build`).
 
 ## Skills
 
 The `skills/` directory contains authoring guides for agents:
-`starbase-authoring`, `interactive-content`, and `flesh-out-subject`.
+`starbase-authoring`, `interactive-content`, `flesh-out-subject`, and `research-claims`.
 
 ## Demo
 

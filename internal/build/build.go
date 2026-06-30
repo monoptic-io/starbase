@@ -20,6 +20,7 @@ import (
 
 	"github.com/monoptic-io/starbase/internal/assets"
 	"github.com/monoptic-io/starbase/internal/cache"
+	"github.com/monoptic-io/starbase/internal/claim"
 	"github.com/monoptic-io/starbase/internal/graph"
 	"github.com/monoptic-io/starbase/internal/model"
 	"github.com/monoptic-io/starbase/internal/parse"
@@ -106,6 +107,10 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 
 	for _, t := range topics {
 		for _, sc := range t.Shortcodes {
+			if sc.Name == "claim" {
+				diags = append(diags, claim.Validate(claim.Parse(sc), t.SourcePath, sc.Line)...)
+				continue
+			}
 			diags = append(diags, eng.Validate(sc, t.SourcePath)...)
 		}
 	}
