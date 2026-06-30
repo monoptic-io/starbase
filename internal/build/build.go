@@ -12,12 +12,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/monoptic-io/starbase/internal/assets"
@@ -155,8 +153,8 @@ func Verify(cfg Config) (Result, error) {
 	for _, u := range rr.Units {
 		if u.Err != "" {
 			res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
-				Severity: model.SevError, File: "evidence/" + u.Name,
-				Message: fmt.Sprintf("evidence unit failed: %s", firstLine(u.Err))})
+				Severity: model.SevError, File: "evidence/" + u.Name + "/run",
+				Message: fmt.Sprintf("check failed: %s", firstLine(u.Err))})
 		} else if u.Cached {
 			res.UnitsCached++
 		} else {
@@ -176,16 +174,16 @@ func Verify(cfg Config) (Result, error) {
 				}
 				continue
 			}
+			ck, ok := rr.Checks[info.Check]
+			if present && ok && ck.Err != "" {
+				continue // the failing run is already reported at evidence/<name>/run
+			}
 			err := func() string {
 				if !present {
-					return fmt.Sprintf("claim references check %q but there is no evidence/ program", info.Check)
+					return fmt.Sprintf("claim references check %q but there is no evidence/ directory", info.Check)
 				}
-				ck, ok := rr.Checks[info.Check]
 				if !ok {
-					return fmt.Sprintf("evidence produced no result named %q", info.Check)
-				}
-				if ck.Error != "" {
-					return fmt.Sprintf("check %q errored: %s", info.Check, ck.Error)
+					return fmt.Sprintf("no evidence check named %q", info.Check)
 				}
 				return compareClaim(info, ck)
 			}()
@@ -208,81 +206,39 @@ func firstLine(s string) string {
 	return s
 }
 
-// compareClaim returns "" if the claim's embedded evidence matches the computed
-// result, else a description of the discrepancy.
+// compareClaim returns "" if the text a claim embeds matches the check's output,
+// else a description of the discrepancy. The contract is a trimmed-exact text
+// comparison — the program prints bytes, the article embeds the expected bytes.
+// The expected text is the claim's result block if it has one, else its value.
 func compareClaim(info claim.Info, ck evidence.Check) string {
-	embRows := claim.Rows(info.Result, info.ResultFmt)
-	if len(ck.Table) > 0 && len(embRows) > 0 {
-		if !tableEqual(embRows, ck.Table) {
-			return fmt.Sprintf("claim check %q: the result table does not match the computed output", info.Check)
-		}
-	} else {
-		prod := firstNonEmpty(ck.Value, scalarOf(ck.Table))
-		emb := firstNonEmpty(info.Value, claim.Scalar(info.Result))
-		if prod != "" && emb != "" && !valueEqual(prod, emb) {
-			return fmt.Sprintf("claim check %q: the article says %q but the computation produced %q", info.Check, emb, prod)
-		}
+	want := strings.TrimSpace(info.Result)
+	if want == "" {
+		want = info.Value
 	}
-	if info.Value != "" {
-		if prod := firstNonEmpty(ck.Value, scalarOf(ck.Table)); prod != "" && !valueEqual(prod, info.Value) {
-			return fmt.Sprintf("claim value %q does not match the computed value %q", info.Value, prod)
-		}
+	if normalizeText(ck.Output) != normalizeText(want) {
+		return fmt.Sprintf("claim check %q: the article's result does not match the computation\n           article:  %s\n           computed: %s",
+			info.Check, oneLine(want), oneLine(ck.Output))
 	}
 	return ""
 }
 
-func scalarOf(t [][]string) string {
-	if len(t) == 0 {
-		return ""
+// normalizeText trims trailing whitespace per line and overall, and normalizes
+// newlines — the one leniency golden-file comparisons universally keep.
+func normalizeText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
 	}
-	last := t[len(t)-1]
-	if len(last) == 1 && len(t) <= 2 {
-		return strings.TrimSpace(last[0])
-	}
-	return ""
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func valueEqual(a, b string) bool {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
-	if strings.EqualFold(a, b) {
-		return true
+func oneLine(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", " | "))
+	if len(s) > 90 {
+		s = s[:87] + "..."
 	}
-	fa, ea := parseNum(a)
-	fb, eb := parseNum(b)
-	if ea == nil && eb == nil {
-		return math.Abs(fa-fb) <= 1e-9*math.Max(1, math.Abs(fa))
-	}
-	return false
-}
-
-func parseNum(s string) (float64, error) {
-	return strconv.ParseFloat(strings.NewReplacer(",", "", "$", "", " ", "", "%", "").Replace(s), 64)
-}
-
-func tableEqual(a, b [][]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if len(a[i]) != len(b[i]) {
-			return false
-		}
-		for j := range a[i] {
-			if !valueEqual(a[i][j], b[i][j]) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
+	return s
 }
 
 // Check performs fast validation only.

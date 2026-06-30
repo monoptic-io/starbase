@@ -52,84 +52,65 @@ write a program that recomputes it. `starbase verify` re-runs the program at bui
 time and **fails if the article and the computation disagree** — so the build, not
 the author, is the source of truth.
 
-Write evidence as **plain Go functions**, exactly like `go test` — no `main`, no
-JSON. The `evidence/` directory is one Go module; each sub-package is a check
-*unit*. A check is an exported function with no parameters that returns a value
-(optionally with an `error`):
+A check is a directory under `evidence/` containing an executable `run`. The
+contract is just **stdout and exit code**, like a golden test — so `run` can be
+*any* program. Bind it to a claim with `check="<directory name>"`:
 
-```go
-package sales
-import (...)
-
-//starbase:deps data/sales.csv          // data deps, relative to the KB root
-
-func MidwestRegions() (int, error) {     // becomes check "midwest-regions"
-    rows, err := readCSV("data/sales.csv")
-    ...
-    return n, nil
-}
-
-func RevenueByDivision() ([][]string, error) {  // a [][]string becomes a table
-    ...
-    return table, nil
-}
+```sh
+# evidence/midwest-regions/run        (chmod +x — needs a #! line)
+# starbase:inputs data/sales.csv
+awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' data/sales.csv
 ```
 
-starbase discovers these functions, generates a runner that calls them (the way
-`go test` generates a test main), runs it with the **KB root as the working
-directory** (so open `data/sales.csv`, not `../../data/...`), and binds each
-result to a claim by its kebab-cased name: `check="midwest-regions"`. Return a
-scalar (`int`, `float64`, `string`, …) for a value or `[][]string` for a table.
-`verify` compares numerically, so `11,400,000` matches `11400000`. The function
-can do anything — pure Go, or shell out to DuckDB, a SQL driver, an API.
+`verify` runs `./run` with the **KB root as the working directory** (so it reads
+`data/sales.csv`, not `../../data/...`), and compares its **stdout, trimmed,
+against the result the claim embeds** — its result block if it has one, else its
+`value`. The comparison is **exact text**, not numeric: `11.4M` does *not* match
+`11400000`, so make both sides agree (let the program print what the prose says,
+or vice-versa). A non-zero exit is a check failure; its stderr is reported at
+`evidence/<check>/run`. Because the contract is text, the program can be a shell
+one-liner over DuckDB, a Python script, a compiled binary — whatever fits.
+
+Show the reader the *real* command — paste `run` (or its core) as the claim's
+implementation, so the drawer matches what the build executes.
 
 ### Incremental, like `go test`
 
-starbase caches each package's results keyed by a hash of its Go sources **plus
-the data files it declares** (`//starbase:deps`, relative to the KB root). A
-package re-runs only when its code or a declared dep changes:
+starbase caches each check keyed by a hash of its `run` script **plus the files
+it declares** with `starbase:inputs` (relative to the KB root). A check re-runs
+only when its script or a declared input changes:
 
 - editing an unrelated page never re-runs anything;
-- editing one check's package re-runs only that package;
-- changing a data file re-runs every package that declares it.
+- editing one check's `run` re-runs only that check;
+- changing a data file re-runs every check that declares it.
 
-**Put each expensive check in its own package directory** so a minutes-long
-simulation isn't re-run when you touch something else. Always declare data deps,
-or the local cache can go stale. The cache is a local convenience: CI starts cold
-and re-runs everything, so CI is authoritative.
+**One expensive check per directory** so a minutes-long run isn't re-run when you
+touch something else. Always declare your inputs, or the local cache can go stale.
+The cache is a local convenience: CI starts cold and re-runs everything, so CI is
+authoritative.
 
 ```sh
-starbase verify <dir>          # re-runs only changed packages; diffs every checked claim
+starbase verify <dir>          # re-runs only changed checks; diffs every checked claim
 starbase verify <dir> -force   # ignore the cache and re-run everything
 ```
 
-### Inputs `//starbase:deps` can't name: export a `Stamp()`
+### Inputs `starbase:inputs` can't name: add a `stamp`
 
-`//starbase:deps` only hashes files. When a check's real input isn't a static
-file — a URL, a database, a clock — declare a **dynamic fingerprint** instead: an
-exported `Stamp()` returning a cheap string that changes whenever the input does.
+`starbase:inputs` only hashes files. When a check's real input isn't a static
+file — a URL, a database, a clock — add an executable `stamp` next to `run` whose
+stdout is a cheap fingerprint that changes whenever the input does:
 
-```go
-// Stamp is cheap; the expensive work lives in the check below.
-func Stamp() (string, error) {
-    return httpEtag("https://api.example.com/feed")   // or: SELECT max(updated_at)
-}
-
-func Reading() (string, error) { ...expensive recompute... }
+```sh
+# evidence/live-feed/stamp        (chmod +x — cheap; run is the expensive part)
+curl -sI https://api.example.com/feed | grep -i etag        # or: a row-version query
 ```
 
-starbase always compiles the package and calls `Stamp()` (so keep it cheap), but
-runs the expensive check only when the stamp — or the package's source — changes.
-Rules of thumb:
-
-- return a fingerprint of every external input (etag, content hash, row version);
-- return a **constant** to mean "only re-run when my code changes";
-- return an **always-different** value to mean "never cache — always re-run."
-
-`Stamp()` doesn't make the cache *sound* — you can still miss an input, exactly
-as you can forget a `deps` line — but it makes non-file inputs *expressible*. CI's
-cold run remains the backstop. Note a stamp tracks the whole package, so keep one
-expensive check per package.
+starbase always runs `stamp` (keep it cheap) but re-runs the expensive `run` only
+when the stamp — or the `run` script — changes. Print a **constant** to mean "only
+re-run when my script changes"; print an **always-different** value to mean "never
+cache — always re-run." A `stamp` doesn't make the cache *sound* — you can still
+miss an input, exactly as you can forget a `starbase:inputs` line — but it makes
+non-file inputs *expressible*. CI's cold run remains the backstop.
 
 Wire `verify` into CI. A claim with a `check` that re-executes and matches is
 **verified**; one with only a pasted result is **attested**; one with neither is

@@ -1,0 +1,4 @@
+#!/bin/sh
+# starbase:inputs data/sales.csv
+# Count the distinct sales regions in the Midwest division.
+awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' data/sales.csv

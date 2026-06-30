@@ -30,7 +30,7 @@ go build -o starbase ./cmd/starbase
 
 ```sh
 starbase check <dir>                 # fast validation: dead links + bad template calls
-starbase verify <dir>                # re-run the evidence/ program, diff every checked claim
+starbase verify <dir>                # re-run the evidence/ checks, diff every checked claim
 starbase build <dir> -o _site \      # full incremental render
         -title "My KB"
 starbase templates [dir]             # list embedded templates and their arguments
@@ -92,29 +92,30 @@ executes nothing; it surfaces what the agent computed.
 coordination signal as a dead link: one agent asserts, the warning tells the swarm
 to go find the evidence (or correct the value).
 
-To make a number **un-fakeable**, bind a claim to a `check` and write a plain Go
-function in `evidence/` that recomputes it — like a `go test` test, no `main` and
-no boilerplate:
+To make a number **un-fakeable**, bind a claim to a `check` and drop an executable
+`run` in `evidence/<check>/` that recomputes it. The contract is just
+`(stdout, exit code)`, like a golden test — so `run` can be anything:
 
-```go
-//starbase:deps data/sales.csv
-func MidwestRegions() (int, error) { ... return n, nil }   // check "midwest-regions"
+```sh
+# evidence/midwest-regions/run        (chmod +x)
+# starbase:inputs data/sales.csv
+awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' data/sales.csv
 ```
 
-starbase discovers the function, generates a runner that calls it (the way
-`go test` generates a test main), and **diffs every checked claim against the
-freshly computed result, failing the build on a mismatch.** The build, not the
-author, is the trust anchor: a fabricated value breaks CI. The function can do
-anything — pure Go, or shell out to DuckDB, a SQL driver, an API.
+`starbase verify` runs each `run` with the KB root as its working directory and
+**compares its stdout, trimmed, against the result the claim embeds — failing the
+build on any mismatch** (a non-zero exit is a check failure; its stderr is
+surfaced). The build, not the author, is the trust anchor: a fabricated value
+breaks CI. Because the contract is text in / text out, a check is any executable
+— a shell one-liner over DuckDB, a Python script, a compiled Go program.
 
-Verification is **incremental like `go test`**: each evidence package's results
-are cached keyed by a hash of its Go sources plus the data files it declares
-(`//starbase:deps`), so a minutes-long simulation re-runs only when its own code
-or data changes — never when you edit an unrelated page. For inputs a static file
-list can't name (a URL, a database, a clock), a package can export a cheap
-`func Stamp() (string, error)` — a dynamic fingerprint that drives re-runs the
-same way. The cache is a local convenience; CI starts cold and is authoritative.
-Claims sort into **unsupported → attested → verified**. See
+Verification is **incremental like `go test`**: each check is cached keyed by a
+hash of its `run` script plus the files it declares with `starbase:inputs`, so a
+minutes-long simulation re-runs only when its script or data changes — never when
+you edit an unrelated page. For inputs a static file list can't name (a URL, a
+database, a clock), add an executable `stamp` whose stdout is a cheap fingerprint
+that drives re-runs the same way. The cache is a local convenience; CI starts cold
+and is authoritative. Claims sort into **unsupported → attested → verified**. See
 `examples/sales-research/` and the `research-claims` skill.
 
 ## Third-party assets & offline builds
@@ -141,7 +142,7 @@ starbase build site -o _site --vendor --offline   # cache only, no network
 
 - **ci.yml** (pull requests): builds, vets, tests, runs `starbase check demo
   -strict` (validating links and template calls *without* rendering), and
-  `starbase verify examples/sales-research` (re-running the evidence program to
+  `starbase verify examples/sales-research` (re-running the evidence checks to
   confirm every checked claim still matches the data).
 - **pages.yml** (push to `main`): renders the demo and publishes it to GitHub
   Pages.

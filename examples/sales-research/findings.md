@@ -8,19 +8,21 @@ summary: Findings about the 2025 regional sales data, each backed by a re-runnab
 
 {{< claim value="4" check="midwest-regions" source="data/sales.csv" asof="2026-06-30" >}}
 The **Midwest** division is served by **4** distinct sales regions — the most of any division.
-```sql
-SELECT count(*) AS regions FROM sales WHERE division = 'Midwest';
+```sh
+# evidence/midwest-regions/run
+awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' data/sales.csv
 ```
 ```result
-regions
 4
 ```
 {{< /claim >}}
 
 {{< claim check="revenue-by-division" source="data/sales.csv" asof="2026-06-30" >}}
 The **Midwest** also leads 2025 revenue at **11,400,000** — ahead of the Northeast's 9,000,000.
-```sql
-SELECT division, sum(revenue) AS total FROM sales GROUP BY division ORDER BY total DESC;
+```sh
+# evidence/revenue-by-division/run
+echo "division,total"
+awk -F, 'NR>1{r[$2]+=$3} END{for(d in r) print d","r[d]}' data/sales.csv | sort -t, -k2,2nr
 ```
 ```result
 division,total

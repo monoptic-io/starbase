@@ -1,23 +1,22 @@
-// Package evidence runs a knowledge base's evidence functions and returns their
-// results, so claims can be verified by re-execution rather than trust.
+// Package evidence runs a knowledge base's checks and returns their output, so
+// claims can be verified by re-execution rather than trust.
 //
-// It works like `go test`: the author writes plain exported functions in an
-// `evidence/` Go module — no main, no JSON, no boilerplate —
+// A check is a directory under `evidence/` containing an executable `run`:
 //
-//	package sales
-//	//starbase:deps ../../data/sales.csv
-//	func MidwestRegions() (int, error) { ... return n, nil }
-//	func RevenueByDivision() ([][]string, error) { ... return table, nil }
+//	evidence/midwest-regions/run   (chmod +x, any #! interpreter)
 //
-// starbase discovers those functions (an exported func with no parameters
-// returning a value, optionally with an error), generates a tiny runner that
-// calls them — exactly as `go test` generates a test main — runs it, and binds
-// each result to a claim via `check="midwest-regions"` (the kebab-cased name).
+// The check's result is whatever `run` prints to stdout; a non-zero exit is an
+// error (its stderr is surfaced). The program can be anything — a shell one-liner
+// over DuckDB, a Python script, a Go program — because the contract is just
+// (stdout, exit code), like a golden test. `verify` compares that stdout, trimmed,
+// against the result a claim embeds, and fails the build when they disagree.
 //
-// It is incremental: each package is a cache unit, keyed by a hash of its Go
-// sources plus the data files it declares with `//starbase:deps`. A package is
-// re-run only when its own code or data changes. The cache lives in the user
-// cache dir, so CI starts cold and is authoritative.
+// It is incremental: each check is a cache unit keyed by a hash of its `run`
+// script plus the files it declares with `starbase:inputs`. A check re-runs only
+// when its script or a declared input changes. For inputs a static file list
+// can't name (a URL, a database, a clock), a check may add an executable `stamp`
+// whose stdout is a cheap fingerprint that also drives re-runs. The cache lives
+// in the user cache dir, so CI starts cold and is authoritative.
 package evidence
 
 import (
@@ -27,9 +26,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,21 +35,21 @@ import (
 	"time"
 )
 
-// Check is one computed result.
+// Check is one check's result: the stdout of its `run`, or an error if `run`
+// exited non-zero.
 type Check struct {
-	Value string     `json:"value,omitempty"`
-	Table [][]string `json:"table,omitempty"`
-	Error string     `json:"error,omitempty"`
+	Output string `json:"output"`
+	Err    string `json:"err,omitempty"`
 }
 
-// Unit is one evidence package and how it was resolved this run.
+// Unit reports how one check was resolved this run.
 type Unit struct {
 	Name   string
 	Cached bool
 	Err    string
 }
 
-// Result is the merged output of every package plus per-package status.
+// Result is every check's output plus per-check status.
 type Result struct {
 	Checks map[string]Check
 	Units  []Unit
@@ -61,343 +57,125 @@ type Result struct {
 
 const perRunTimeout = 20 * time.Minute
 
-type fn struct {
-	GoName  string // exported Go function name
-	Name    string // kebab-cased check name
-	Results int    // 1 or 2 (value, or value+error)
-}
-
-type pkg struct {
-	ImportPath   string
-	Dir          string
-	RelName      string // path relative to evidence/, for display
-	GoFiles      []string
-	funcs        []fn
-	hasStamp     bool // exports func Stamp() — a dynamic freshness fingerprint
-	stampResults int  // 1 (string) or 2 (string, error)
-	staticKey    string
-}
-
-// producedUnit is what the generated runner reports back for one package.
-type producedUnit struct {
-	Ran    bool             `json:"ran"`
-	Stamp  string           `json:"stamp"`
-	Checks map[string]Check `json:"checks"`
-}
-
-// Run resolves every evidence package, reusing cached results whose inputs are
-// unchanged and re-running the rest. The bool reports whether evidence exists.
+// Run resolves every check under evidence/, reusing cached output whose inputs
+// are unchanged and re-running the rest. The bool reports whether evidence exists.
 //
-// A package is re-run when its source or declared //starbase:deps changed (the
-// "static key", computed without running anything), or — for packages that
-// export a Stamp() — when their stamp differs from the cached one. Packages with
-// a Stamp() are always compiled and their cheap Stamp() called; only those whose
-// stamp (or static key) moved pay for the expensive check.
+// A check re-runs when its `run` script or a declared starbase:inputs file
+// changed (the static key, computed without executing anything), or — for checks
+// with a `stamp` — when their stamp differs from the cached one. Checks with a
+// stamp always pay for the cheap stamp; only those whose stamp (or static key)
+// moved pay for the expensive run.
 func Run(contentDir string, force bool) (Result, bool, error) {
 	evDir := filepath.Join(contentDir, "evidence")
 	if fi, err := os.Stat(evDir); err != nil || !fi.IsDir() {
 		return Result{}, false, nil
 	}
-	pkgs, _, err := listPackages(evDir)
+	absRoot, _ := filepath.Abs(contentDir)
+	entries, err := os.ReadDir(evDir)
 	if err != nil {
 		return Result{}, true, err
 	}
 
 	cache := loadCache(contentDir)
 	res := Result{Checks: map[string]Check{}}
-	var toRun []*pkg // packages the runner must touch (stale, or carry a Stamp)
 
-	emitCached := func(p *pkg) {
-		res.Units = append(res.Units, Unit{Name: p.RelName, Cached: true})
-		for n, ck := range cache[p.ImportPath].Checks {
-			res.Checks[n] = ck
-		}
+	useCached := func(name string, c cachedUnit) {
+		res.Checks[name] = c.Check
+		res.Units = append(res.Units, Unit{Name: name, Cached: true})
 	}
 
-	for i := range pkgs {
-		p := &pkgs[i]
-		if len(p.funcs) == 0 {
-			continue // not an evidence package
-		}
-		p.staticKey = unitKey(p, contentDir)
-		c, ok := cache[p.ImportPath]
-		staticFresh := ok && c.StaticKey == p.staticKey
-		if !force && staticFresh && !p.hasStamp {
-			emitCached(p) // nothing to compile or run
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
-		toRun = append(toRun, p)
-	}
-
-	if len(toRun) > 0 {
-		produced, runErr := runGenerated(evDir, contentDir, toRun, cache, force)
-		for _, p := range toRun {
-			if runErr != "" {
-				res.Units = append(res.Units, Unit{Name: p.RelName, Err: runErr})
-				continue
-			}
-			pu := produced[p.ImportPath]
-			if !pu.Ran {
-				emitCached(p) // Stamp() matched: reuse cached results
-				continue
-			}
-			cache[p.ImportPath] = cachedUnit{StaticKey: p.staticKey, Stamp: pu.Stamp, Checks: pu.Checks}
-			for n, ck := range pu.Checks {
-				res.Checks[n] = ck
-			}
-			res.Units = append(res.Units, Unit{Name: p.RelName})
+		runPath := filepath.Join(evDir, name, "run")
+		if !isExecutable(runPath) {
+			continue // a directory without an executable run/ is not a check
 		}
+		staticKey := unitKey(runPath, contentDir)
+		stampPath := filepath.Join(evDir, name, "stamp")
+		hasStamp := isExecutable(stampPath)
+
+		c, cached := cache[name]
+		staticFresh := cached && c.StaticKey == staticKey
+		if !force && staticFresh && !hasStamp {
+			useCached(name, c) // nothing to execute
+			continue
+		}
+
+		stamp := ""
+		if hasStamp {
+			out, serr := execScript(stampPath, absRoot)
+			if serr != "" {
+				stamp = "stamp error: " + serr // forces a (re)run and differs from any prior stamp
+			} else {
+				stamp = strings.TrimSpace(out)
+			}
+		}
+		if !force && staticFresh && hasStamp && stamp == c.Stamp {
+			useCached(name, c) // stamp matched: skip the expensive run
+			continue
+		}
+
+		out, rerr := execScript(runPath, absRoot)
+		ck := Check{Output: out, Err: rerr}
+		cache[name] = cachedUnit{StaticKey: staticKey, Stamp: stamp, Check: ck}
+		res.Checks[name] = ck
+		res.Units = append(res.Units, Unit{Name: name, Err: ck.Err})
 	}
 	saveCache(contentDir, cache)
 	return res, true, nil
 }
 
-// --- package + function discovery ---
-
-// stampFunc is the reserved function name a package exports to declare a dynamic
-// freshness fingerprint. It is not a check.
-const stampFunc = "Stamp"
-
-func listPackages(evDir string) ([]pkg, string, error) {
-	cmd := exec.Command("go", "list", "-json", "./...")
-	cmd.Dir = evDir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, "", fmt.Errorf("evidence/ must be a Go module: %s", msg)
-	}
-	type listed struct {
-		ImportPath string
-		Dir        string
-		GoFiles    []string
-		Module     struct{ Path string }
-	}
-	var pkgs []pkg
-	var modPath string
-	dec := json.NewDecoder(&stdout)
-	for dec.More() {
-		var l listed
-		if err := dec.Decode(&l); err != nil {
-			return nil, "", err
-		}
-		if l.Module.Path != "" {
-			modPath = l.Module.Path
-		}
-		rel, _ := filepath.Rel(evDir, l.Dir)
-		p := pkg{ImportPath: l.ImportPath, Dir: l.Dir, RelName: filepath.ToSlash(rel)}
-		for _, g := range l.GoFiles {
-			p.GoFiles = append(p.GoFiles, filepath.Join(l.Dir, g))
-		}
-		p.funcs, p.hasStamp, p.stampResults = discoverFuncs(p.GoFiles)
-		pkgs = append(pkgs, p)
-	}
-	return pkgs, modPath, nil
+func isExecutable(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
 }
 
-func discoverFuncs(goFiles []string) (funcs []fn, hasStamp bool, stampResults int) {
-	fset := token.NewFileSet()
-	for _, gf := range goFiles {
-		f, err := parser.ParseFile(fset, gf, nil, 0)
-		if err != nil {
-			continue
-		}
-		for _, decl := range f.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv != nil || !fd.Name.IsExported() {
-				continue
-			}
-			if fd.Type.Params != nil && len(fd.Type.Params.List) > 0 {
-				continue
-			}
-			n := results(fd.Type)
-			if n != 1 && n != 2 {
-				continue
-			}
-			if fd.Name.Name == stampFunc {
-				hasStamp, stampResults = true, n
-				continue // freshness fingerprint, not a check
-			}
-			funcs = append(funcs, fn{GoName: fd.Name.Name, Name: kebab(fd.Name.Name), Results: n})
-		}
-	}
-	sort.Slice(funcs, func(i, j int) bool { return funcs[i].GoName < funcs[j].GoName })
-	return funcs, hasStamp, stampResults
-}
-
-// results returns the count if the signature is a check: (T) or (T, error).
-func results(t *ast.FuncType) int {
-	if t.Results == nil {
-		return 0
-	}
-	var names []string
-	for _, r := range t.Results.List {
-		// a field may declare multiple results sharing a type
-		count := 1
-		if len(r.Names) > 1 {
-			count = len(r.Names)
-		}
-		for i := 0; i < count; i++ {
-			if id, ok := r.Type.(*ast.Ident); ok {
-				names = append(names, id.Name)
-			} else {
-				names = append(names, "?")
-			}
-		}
-	}
-	switch len(names) {
-	case 1:
-		return 1
-	case 2:
-		if names[1] == "error" {
-			return 2
-		}
-	}
-	return 0
-}
-
-// --- generated runner ---
-
-func runGenerated(evDir, contentDir string, pkgs []*pkg, cache map[string]cachedUnit, force bool) (map[string]producedUnit, string) {
-	absRoot, _ := filepath.Abs(contentDir)
-	genDir := filepath.Join(evDir, ".sbgen")
-	_ = os.RemoveAll(genDir)
-	if err := os.MkdirAll(genDir, 0o755); err != nil {
-		return nil, err.Error()
-	}
-	defer os.RemoveAll(genDir)
-
-	var imports, body strings.Builder
-	for i, p := range pkgs {
-		alias := fmt.Sprintf("p%d", i)
-		fmt.Fprintf(&imports, "\t%s %q\n", alias, p.ImportPath)
-
-		// A package re-runs its checks if its static inputs moved or (when it has
-		// a Stamp) its stamp differs from the cached one.
-		alwaysRun := force || cache[p.ImportPath].StaticKey != p.staticKey
-
-		fmt.Fprintf(&body, "\tfunc() {\n\t\tu := unit{}\n")
-		if p.hasStamp {
-			if p.stampResults == 2 {
-				fmt.Fprintf(&body, "\t\tif s, err := %s.Stamp(); err != nil { u.Stamp = \"stamp error: \" + err.Error(); u.Ran = true } else { u.Stamp = s }\n", alias)
-			} else {
-				fmt.Fprintf(&body, "\t\tu.Stamp = %s.Stamp()\n", alias)
-			}
-		}
-		if alwaysRun {
-			fmt.Fprintf(&body, "\t\tu.Ran = true\n")
-		} else if p.hasStamp {
-			fmt.Fprintf(&body, "\t\tif u.Stamp != %q { u.Ran = true }\n", cache[p.ImportPath].Stamp)
-		}
-		fmt.Fprintf(&body, "\t\tif u.Ran {\n\t\t\tm := map[string]check{}\n")
-		for _, f := range p.funcs {
-			if f.Results == 2 {
-				fmt.Fprintf(&body, "\t\t\t{ v, err := %s.%s(); emit(m, %q, v, err) }\n", alias, f.GoName, f.Name)
-			} else {
-				fmt.Fprintf(&body, "\t\t\t{ v := %s.%s(); emit(m, %q, v, nil) }\n", alias, f.GoName, f.Name)
-			}
-		}
-		fmt.Fprintf(&body, "\t\t\tu.Checks = m\n\t\t}\n\t\tunits[%q] = u\n\t}()\n", p.ImportPath)
-	}
-	// Evidence runs with the knowledge-base root as its working directory, so
-	// functions reference data relative to the KB (e.g. "data/sales.csv").
-	chdir := fmt.Sprintf("\tif err := os.Chdir(%q); err != nil { panic(err) }\n", absRoot)
-	src := "package main\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"reflect\"\n" +
-		imports.String() + ")\n\n" + runnerBody + "\nfunc main() {\n" + chdir + body.String() +
-		"\tjson.NewEncoder(os.Stdout).Encode(units)\n}\n"
-	if err := os.WriteFile(filepath.Join(genDir, "main.go"), []byte(src), 0o644); err != nil {
-		return nil, err.Error()
-	}
-
+// execScript runs an executable with the knowledge-base root as its working
+// directory (so it references data as "data/sales.csv"). It returns stdout and,
+// on a non-zero exit, the stderr (or the error) — empty stderr means success.
+func execScript(path, cwd string) (stdout, errMsg string) {
 	ctx, cancel := context.WithTimeout(context.Background(), perRunTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "run", "./.sbgen")
-	cmd.Dir = evDir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd := exec.CommandContext(ctx, path)
+	cmd.Dir = cwd
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(errb.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, msg
+		return out.String(), msg
 	}
-	var out map[string]producedUnit
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &out); err != nil {
-		return nil, "evidence runner produced invalid output: " + err.Error()
-	}
-	return out, ""
+	return out.String(), ""
 }
-
-const runnerBody = `type check struct {
-	Value string     ` + "`json:\"value,omitempty\"`" + `
-	Table [][]string ` + "`json:\"table,omitempty\"`" + `
-	Error string     ` + "`json:\"error,omitempty\"`" + `
-}
-type unit struct {
-	Ran    bool             ` + "`json:\"ran\"`" + `
-	Stamp  string           ` + "`json:\"stamp\"`" + `
-	Checks map[string]check ` + "`json:\"checks,omitempty\"`" + `
-}
-var units = map[string]unit{}
-func emit(m map[string]check, name string, v interface{}, err error) {
-	c := check{}
-	if err != nil {
-		c.Error = err.Error()
-	} else if rv := reflect.ValueOf(v); rv.IsValid() {
-		if s, ok := v.([][]string); ok {
-			c.Table = s
-		} else if rv.Kind() == reflect.Slice && rv.Len() > 0 && deref(rv.Index(0)).Kind() == reflect.Slice {
-			var t [][]string
-			for i := 0; i < rv.Len(); i++ {
-				row := deref(rv.Index(i))
-				var r []string
-				for j := 0; j < row.Len(); j++ {
-					r = append(r, fmt.Sprintf("%v", row.Index(j).Interface()))
-				}
-				t = append(t, r)
-			}
-			c.Table = t
-		} else {
-			c.Value = fmt.Sprintf("%v", v)
-		}
-	}
-	m[name] = c
-}
-func deref(v reflect.Value) reflect.Value {
-	if v.Kind() == reflect.Interface {
-		return v.Elem()
-	}
-	return v
-}
-`
 
 // --- cache key ---
 
-var reDeps = regexp.MustCompile(`(?m)^\s*//\s*starbase:deps\s+(.+)$`)
+// reInputs matches a declaration line in any comment style, e.g.
+//
+//	# starbase:inputs data/sales.csv other/*.csv
+//	// starbase:inputs data/sales.csv
+var reInputs = regexp.MustCompile(`(?m)^.*?starbase:inputs[ \t]+(.+)$`)
 
-func unitKey(p *pkg, contentDir string) string {
+func unitKey(runPath, contentDir string) string {
 	h := sha256.New()
+	b, err := os.ReadFile(runPath)
+	if err != nil {
+		return ""
+	}
+	h.Write(b)
+
 	depSet := map[string]bool{}
-	files := append([]string(nil), p.GoFiles...)
-	sort.Strings(files)
-	for _, gf := range files {
-		b, err := os.ReadFile(gf)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(h, "go:%s\n", filepath.Base(gf))
-		h.Write(b)
-		for _, m := range reDeps.FindAllStringSubmatch(string(b), -1) {
-			for _, pat := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
-				// dep paths are relative to the KB root (the runner's CWD)
-				matches, _ := filepath.Glob(filepath.Join(contentDir, pat))
-				for _, mt := range matches {
-					depSet[mt] = true
-				}
+	for _, m := range reInputs.FindAllStringSubmatch(string(b), -1) {
+		for _, pat := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+			// inputs are relative to the KB root (the run script's CWD)
+			matches, _ := filepath.Glob(filepath.Join(contentDir, pat))
+			for _, mt := range matches {
+				depSet[mt] = true
 			}
 		}
 	}
@@ -407,40 +185,23 @@ func unitKey(p *pkg, contentDir string) string {
 	}
 	sort.Strings(deps)
 	for _, dep := range deps {
-		b, err := os.ReadFile(dep)
+		fb, err := os.ReadFile(dep)
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(p.Dir, dep)
-		fmt.Fprintf(h, "dep:%s\n", rel)
-		h.Write(b)
+		rel, _ := filepath.Rel(contentDir, dep)
+		fmt.Fprintf(h, "\x00input:%s\x00", rel)
+		h.Write(fb)
 	}
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// --- kebab-case ---
-
-func kebab(s string) string {
-	var b strings.Builder
-	for i, r := range s {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				b.WriteByte('-')
-			}
-			b.WriteRune(r + 32)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 // --- persisted cache (user cache dir; CI starts cold) ---
 
 type cachedUnit struct {
-	StaticKey string           `json:"static_key"` // hash of Go sources + //starbase:deps
-	Stamp     string           `json:"stamp,omitempty"`
-	Checks    map[string]Check `json:"checks"`
+	StaticKey string `json:"static_key"` // hash of run script + declared inputs
+	Stamp     string `json:"stamp,omitempty"`
+	Check     Check  `json:"check"`
 }
 
 func cachePath(contentDir string) string {

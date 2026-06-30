@@ -20,5 +20,3 @@ internal/assets/static/katex/
 # local evidence cache (also kept in the user cache dir)
 **/.starbase-evidence.json
 
-# generated evidence runner (transient)
-**/evidence/.sbgen/
