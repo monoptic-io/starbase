@@ -263,11 +263,15 @@
     if (typeof data !== "string") return [[]];
     data = data.trim();
     if (data[0] === "[") { try { var j = JSON.parse(data); return Array.isArray(j[0]) ? j : [j]; } catch (e) {} }
-    // "x:y" pairs, separated by commas, spaces, semicolons, or newlines.
-    if (/[:]/.test(data)) {
-      var pts = data.split(/[;,\s]+/).filter(Boolean).map(function (p) {
-        var kv = p.split(":"); return [Number(kv[0]), Number(kv[1])];
-      }).filter(function (p) { return !isNaN(p[0]) && !isNaN(p[1]); });
+    // "x:y" or "label:y" pairs. Labels may contain spaces, so split on commas/
+    // semicolons/newlines when a comma is present; else fall back to whitespace
+    // (the legacy "0:1 1:3" numeric form). x is kept raw (string or number).
+    if (/:/.test(data)) {
+      var sep = data.indexOf(",") !== -1 ? /[;,\n]+/ : /[;\s\n]+/;
+      var pts = data.split(sep).filter(Boolean).map(function (p) {
+        var i = p.lastIndexOf(":");
+        return [p.slice(0, i).trim(), Number(p.slice(i + 1))];
+      }).filter(function (p) { return !isNaN(p[1]); });
       return [pts];
     }
     return [data.split(/[\s,]+/).map(Number).filter(function (n) { return !isNaN(n); })];
@@ -278,24 +282,34 @@
     function render() {
       var ctx = view.ctx, W = view.W, H = view.H;
       view.clear();
-      var series = parseSeries(c.data);
-      var pad = { l: 42, r: 14, t: 12, b: 28 };
-      var pts = series[0] || [];
-      var ys, xs;
-      if (pts.length && Array.isArray(pts[0])) { xs = pts.map(function (p) { return p[0]; }); ys = pts.map(function (p) { return p[1]; }); }
-      else { ys = pts; xs = pts.map(function (_, i) { return i; }); }
+      var pts = parseSeries(c.data)[0] || [];
+      var ys, rawx;
+      if (pts.length && Array.isArray(pts[0])) { rawx = pts.map(function (p) { return p[0]; }); ys = pts.map(function (p) { return p[1]; }); }
+      else { ys = pts; rawx = pts.map(function (_, i) { return i; }); }
       if (!ys.length) return;
+
+      // Categorical when explicit labels are given, or any x isn't numeric.
+      var labels = c.labels ? String(c.labels).split(",").map(function (s) { return s.trim(); }) : null;
+      var categorical = !!labels || rawx.some(function (x) { return x === "" || isNaN(Number(x)); });
+      if (categorical && !labels) labels = rawx.map(String);
+      var pad = { l: 42, r: 14, t: 12, b: labels ? 38 : 26 };
+
+      var px;
+      if (categorical) {
+        var slot = (W - pad.l - pad.r) / ys.length;
+        px = function (i) { return pad.l + slot * (i + 0.5); };
+      } else {
+        var xs = rawx.map(Number), xmin = Math.min.apply(null, xs), xmax = Math.max.apply(null, xs);
+        if (xmin === xmax) xmax = xmin + 1;
+        px = function (i) { return pad.l + (xs[i] - xmin) / (xmax - xmin) * (W - pad.l - pad.r); };
+      }
       var ymin = Math.min.apply(null, ys), ymax = Math.max.apply(null, ys);
       if (ymin > 0) ymin = 0; if (ymax < 0) ymax = 0;
       if (ymin === ymax) ymax = ymin + 1;
-      var xmin = Math.min.apply(null, xs), xmax = Math.max.apply(null, xs);
-      if (xmin === xmax) xmax = xmin + 1;
-      var px = function (x) { return pad.l + (x - xmin) / (xmax - xmin) * (W - pad.l - pad.r); };
       var py = function (y) { return H - pad.b - (y - ymin) / (ymax - ymin) * (H - pad.t - pad.b); };
 
-      // axes + gridlines
       ctx.strokeStyle = css("--border"); ctx.fillStyle = css("--text-faint");
-      ctx.font = "11px " + css("--sans"); ctx.lineWidth = 1;
+      ctx.font = "11px " + css("--sans"); ctx.lineWidth = 1; ctx.textAlign = "left";
       for (var g = 0; g <= 4; g++) {
         var yv = ymin + (ymax - ymin) * g / 4, y = py(yv);
         ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
@@ -303,24 +317,36 @@
       }
       var accent = c.color || css("--accent");
       if (c.type === "bar") {
-        var bw = (W - pad.l - pad.r) / ys.length * 0.7;
+        var bw = (categorical ? slot : (W - pad.l - pad.r) / ys.length) * 0.66;
         ys.forEach(function (y, i) {
-          var x = px(xs[i]); ctx.fillStyle = accent;
-          ctx.fillRect(x - bw / 2, py(Math.max(0, y)), bw, Math.abs(py(y) - py(0)));
+          ctx.fillStyle = accent;
+          ctx.fillRect(px(i) - bw / 2, py(Math.max(0, y)), bw, Math.abs(py(y) - py(0)));
         });
       } else if (c.type === "scatter") {
         ctx.fillStyle = accent;
-        ys.forEach(function (y, i) { ctx.beginPath(); ctx.arc(px(xs[i]), py(y), 3, 0, 7); ctx.fill(); });
+        ys.forEach(function (y, i) { ctx.beginPath(); ctx.arc(px(i), py(y), 3, 0, 7); ctx.fill(); });
       } else {
         if (c.fill) {
-          ctx.beginPath(); ctx.moveTo(px(xs[0]), py(0));
-          ys.forEach(function (y, i) { ctx.lineTo(px(xs[i]), py(y)); });
-          ctx.lineTo(px(xs[xs.length - 1]), py(0)); ctx.closePath();
+          ctx.beginPath(); ctx.moveTo(px(0), py(0));
+          ys.forEach(function (y, i) { ctx.lineTo(px(i), py(y)); });
+          ctx.lineTo(px(ys.length - 1), py(0)); ctx.closePath();
           ctx.fillStyle = accent; ctx.globalAlpha = 0.12; ctx.fill(); ctx.globalAlpha = 1;
         }
         ctx.beginPath(); ctx.strokeStyle = accent; ctx.lineWidth = 2;
-        ys.forEach(function (y, i) { var X = px(xs[i]), Y = py(y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+        ys.forEach(function (y, i) { var X = px(i), Y = py(y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
         ctx.stroke();
+      }
+      // category labels under the x-axis (skip if too crowded to read)
+      if (labels && labels.length <= 16) {
+        ctx.fillStyle = css("--text-faint"); ctx.textAlign = "center"; ctx.font = "10px " + css("--sans");
+        var maxw = (W - pad.l - pad.r) / labels.length - 2;
+        labels.forEach(function (lab, i) {
+          var s = lab;
+          while (s.length > 3 && ctx.measureText(s).width > maxw) s = s.slice(0, -1);
+          if (s !== lab) s = s.slice(0, -1) + "…";
+          ctx.fillText(s, px(i), H - pad.b + 13);
+        });
+        ctx.textAlign = "left";
       }
     }
     render();
