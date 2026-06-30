@@ -314,26 +314,42 @@
     try { fn = new Function("canvas", "ctx", "t", "dt", "W", "H", "mouse", "state", "frame", "with (Math) {" + src + "}"); }
     catch (e) { fail(canvas, "sketch error: " + e.message); return; }
     var view = hidpi(canvas), running = true, last = 0, t = 0, frameN = 0, state = {};
-    var mouse = { x: 0, y: 0, down: false };
+    var mouse = { x: 0, y: 0, down: false, clicked: false };
+    // heldDown tracks the physical button; clickLatch guarantees a fast click
+    // (down+up between two frames) is still seen for one frame.
+    var heldDown = false, clickLatch = false;
     canvas.addEventListener("pointermove", function (e) {
       var r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
     });
-    canvas.addEventListener("pointerdown", function () { mouse.down = true; });
-    window.addEventListener("pointerup", function () { mouse.down = false; });
+    canvas.addEventListener("pointerdown", function (e) {
+      var r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
+      heldDown = true; clickLatch = true;
+    });
+    window.addEventListener("pointerup", function () { heldDown = false; });
+    var errs = 0;
     function loop(ts) {
       var dt = last ? Math.min((ts - last) / 1000, 0.05) : 0.016; last = ts;
       if (running) {
+        mouse.down = heldDown || clickLatch;
+        mouse.clicked = clickLatch;
         t += dt; view.clear();
-        try { fn(canvas, view.ctx, t, dt, view.W, view.H, mouse, state, frameN); }
-        catch (e) { fail(canvas, "sketch error: " + e.message); running = false; return; }
-        frameN++;
+        try {
+          fn(canvas, view.ctx, t, dt, view.W, view.H, mouse, state, frameN);
+          frameN++;
+        } catch (e) {
+          // Tolerate transient errors (a single bad frame shouldn't kill the
+          // animation); give up only if it keeps throwing.
+          if (++errs > 8) { fail(canvas, "sketch error: " + e.message); running = false; return; }
+          if (window.console) console.warn("sketch frame error:", e.message);
+        }
+        clickLatch = false; // consumed; true for exactly one frame after a press
       }
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
     wireControls(figure, {
       toggle: function (btn) { running = !running; btn.textContent = running ? "⏸" : "▶"; last = 0; },
-      reset: function () { t = 0; frameN = 0; last = 0; state = {}; },
+      reset: function () { t = 0; frameN = 0; last = 0; state = {}; errs = 0; },
     });
   }
 

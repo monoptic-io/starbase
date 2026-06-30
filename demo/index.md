@@ -45,6 +45,12 @@ as [[Linear Transformation]]s, and the [[Eigenvalues and Eigenvectors]] that dec
 
 **[[Graph Theory & Networks]]** — nodes and edges everywhere: [[Breadth-First Search]],
 [[Dijkstra's Algorithm]], [[PageRank]], and [[Small-World Network]]s.
+
+**[[Probability & Random Processes]]** — structure in randomness: the [[Random Walk]],
+the [[Central Limit Theorem]], [[Markov Chain]]s, and [[Brownian Motion]].
+
+**[[Information Theory]]** — measuring surprise and its limits: [[Entropy]],
+[[Huffman Coding]], [[Error-Correcting Code]]s, and [[Channel Capacity]].
 {{< /columns >}}
 
 {{< note kind="tip" title="How to explore" >}}

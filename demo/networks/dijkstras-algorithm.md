@@ -70,7 +70,7 @@ for (let step = 0; step < 12 && state.pq.length > 0; step++) {
 }
 if (state.pq.length === 0) {
   state.done++;
-  if (state.done > 70) state.dist = null;
+  if (state.done > 70) { state.dist = null; return; } // reset next frame; don't draw a nulled grid
 }
 ctx.fillStyle = '#0c1018';
 ctx.fillRect(0, 0, W, H);
