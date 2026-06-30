@@ -46,4 +46,30 @@ func TestCompareClaim(t *testing.T) {
 		evidence.Check{Output: "division,total\nMidwest,9000000"}); msg == "" {
 		t.Error("expected mismatch for wrong table")
 	}
+
+	// value-laundering: an honest result block must not excuse a fabricated value
+	out := "85 of 292 figures (29.1%) lead with digit 1\n"
+	if msg := compareClaim(
+		claim.Info{Check: "x", Value: "35.0%", Result: out},
+		evidence.Check{Output: out}); msg == "" {
+		t.Error("a fabricated value must be caught even when the result block is honest")
+	}
+	// a value present as a whole word verifies, tolerant of surrounding punctuation
+	if msg := compareClaim(
+		claim.Info{Check: "x", Value: "29.1%", Result: out},
+		evidence.Check{Output: out}); msg != "" {
+		t.Errorf("value present as a token should verify, got %q", msg)
+	}
+	// '=' vs space tolerated: "maxdev 1.7%" matches "maxdev=1.7%"
+	if !valueInText("maxdev 1.7%", "N=292 chi2=3.22 maxdev=1.7%") {
+		t.Error("value should match across '=' / whitespace differences")
+	}
+	// whole-word: "4" must not match inside "42"
+	if valueInText("4", "42") {
+		t.Error("value must match whole words, not substrings")
+	}
+	// a check claim embedding neither a result block nor a value has nothing to verify
+	if msg := compareClaim(claim.Info{Check: "x"}, evidence.Check{Output: "anything"}); msg == "" {
+		t.Error("a claim with neither result nor value should be flagged")
+	}
 }
