@@ -67,6 +67,37 @@ print(rounded.pop())
 
 A correlation near $0.82$ sounds like a strong, trustworthy linear relationship — and for Set I it is. For Set II it hides a curve; for Set III it has been inflated by a single outlier; for Set IV it is essentially meaningless, manufactured by one point. The number is the same in every case.
 
+## Look at the data
+
+Here is the whole argument in one picture. Each panel plots one dataset against the **same** least-squares line $y = 3.00 + 0.50\,x$ that every one of them produces. The summary statistics are identical; the shapes could hardly be more different.
+
+{{< sketch height="380" caption="Anscombe's quartet: identical means, variances, correlation, and regression line — four different stories. Set II bends, Set III has a lone high outlier, Set IV is a single point doing all the work." >}}
+const sets = [
+  [[10,8.04],[8,6.95],[13,7.58],[9,8.81],[11,8.33],[14,9.96],[6,7.24],[4,4.26],[12,10.84],[7,4.82],[5,5.68]],
+  [[10,9.14],[8,8.14],[13,8.74],[9,8.77],[11,9.26],[14,8.1],[6,6.13],[4,3.1],[12,9.13],[7,7.26],[5,4.74]],
+  [[10,7.46],[8,6.77],[13,12.74],[9,7.11],[11,7.81],[14,8.84],[6,6.08],[4,5.39],[12,8.15],[7,6.42],[5,5.73]],
+  [[8,6.58],[8,5.76],[8,7.71],[8,8.84],[8,8.47],[8,7.04],[8,5.25],[19,12.5],[8,5.56],[8,7.91],[8,6.89]]
+];
+const labels = ['I', 'II', 'III', 'IV'];
+const gap = 12, pw = (W - gap) / 2, ph = (H - gap) / 2;
+const xlo = 2, xhi = 20, ylo = 2, yhi = 14, m = 26;
+for (let i = 0; i < 4; i++) {
+  const col = i % 2, row = (i / 2) | 0;
+  const x0 = col * (pw + gap), y0 = row * (ph + gap);
+  const ax = x0 + m, ab = y0 + ph - 20, plotW = pw - m - 8, plotH = ph - m - 8;
+  const sx = v => ax + (v - xlo) / (xhi - xlo) * plotW;
+  const sy = v => ab - (v - ylo) / (yhi - ylo) * plotH;
+  ctx.strokeStyle = 'rgba(150,160,180,0.35)'; ctx.lineWidth = 1;
+  ctx.strokeRect(ax, ab - plotH, plotW, plotH);
+  ctx.strokeStyle = '#e0654f'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(sx(xlo), sy(3 + 0.5 * xlo)); ctx.lineTo(sx(xhi), sy(3 + 0.5 * xhi)); ctx.stroke();
+  ctx.fillStyle = '#5aa9e6';
+  for (const p of sets[i]) { ctx.beginPath(); ctx.arc(sx(p[0]), sy(p[1]), 3.5, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#cfd6e6'; ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText('Set ' + labels[i], ax + 5, y0 + 16);
+}
+{{< /sketch >}}
+
 ## Why it matters
 
 Anscombe's quartet is a compact rebuttal to "the data is summarized by its statistics." The same caution runs through the rest of this section. The [[Central Limit Theorem]] promises that *averages* converge to a bell curve, and the [[Law of Large Numbers]] promises that sample means approach the truth — but both speak about aggregates, and an aggregate can be blind to shape, skew, and outliers in exactly the way the quartet exploits. A least-squares line is itself a projection — the [[Linear Algebra]] of minimizing squared residuals — and like any projection it throws information away; the quartet is four different pre-images of the same low-dimensional shadow.
