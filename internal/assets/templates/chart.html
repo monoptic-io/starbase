@@ -1,0 +1,19 @@
+{{/* @doc A line/bar/scatter chart drawn to a <canvas>. data is comma-separated y-values, or "x:y" pairs separated by spaces/semicolons, or JSON. */}}
+{{/* @param data required */}}
+{{/* @param type default="line" */}}
+{{/* @param height default="320" */}}
+{{/* @param title default="" */}}
+{{/* @param xlabel default="" */}}
+{{/* @param ylabel default="" */}}
+{{/* @param labels default="" */}}
+{{/* @param color default="#5b9cff" */}}
+{{/* @param fill default="true" */}}
+{{/* @param caption default="" */}}
+<figure class="sg-figure sg-widget" data-widget="chart" data-config="{{ .ID }}-cfg">
+  {{- if .title }}<figcaption class="sg-fig-title">{{ .title }}</figcaption>{{ end }}
+  <canvas id="{{ .ID }}" class="sg-canvas" style="height:{{ .height }}px"></canvas>
+  <script type="application/json" id="{{ .ID }}-cfg">{{ json (dict
+    "type" .type "data" .data "labels" .labels "title" .title
+    "xlabel" .xlabel "ylabel" .ylabel "color" .color "fill" (bool .fill)) }}</script>
+  {{- if .caption }}<figcaption>{{ .caption }}</figcaption>{{ end }}
+</figure>

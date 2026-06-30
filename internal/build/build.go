@@ -1,0 +1,562 @@
+// Package build orchestrates the two sitegen commands:
+//
+//   - Check: fast validation — parse, resolve links, validate shortcode args.
+//     Reports missing topics and bad template calls without rendering anything.
+//   - Build: the full static-site generation, with incremental rendering driven
+//     by per-page fingerprints.
+package build
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/ryannedolan/sitegen/internal/assets"
+	"github.com/ryannedolan/sitegen/internal/cache"
+	"github.com/ryannedolan/sitegen/internal/graph"
+	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/ryannedolan/sitegen/internal/parse"
+	"github.com/ryannedolan/sitegen/internal/registry"
+	"github.com/ryannedolan/sitegen/internal/render"
+	"github.com/ryannedolan/sitegen/internal/tmpl"
+)
+
+type Config struct {
+	ContentDir string
+	OutDir     string
+	SiteTitle  string
+	BaseURL    string
+	Drafts     bool
+	Force      bool // ignore cache, rebuild everything
+}
+
+type Result struct {
+	Topics      int
+	Rendered    int
+	Skipped     int
+	Diagnostics []model.Diagnostic
+}
+
+func (r Result) Errors() (n int) {
+	for _, d := range r.Diagnostics {
+		if d.Severity == model.SevError {
+			n++
+		}
+	}
+	return n
+}
+
+func (r Result) Warnings() (n int) {
+	for _, d := range r.Diagnostics {
+		if d.Severity == model.SevWarn {
+			n++
+		}
+	}
+	return n
+}
+
+var ignoredDirs = map[string]bool{
+	"templates": true, "theme": true, "layout": true,
+	"node_modules": true, "_site": true, "dist": true,
+}
+
+// index runs the shared parse + resolve + validate phase used by both commands.
+func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []model.Diagnostic, error) {
+	files, err := collectMarkdown(cfg)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	var topics []*model.Topic
+	var diags []model.Diagnostic
+	for _, rel := range files {
+		t, ds, err := parse.File(cfg.ContentDir, rel)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		diags = append(diags, ds...)
+		if t.Draft && !cfg.Drafts {
+			continue
+		}
+		topics = append(topics, t)
+	}
+
+	reg, regDiags := registry.New(topics)
+	diags = append(diags, regDiags...)
+	diags = append(diags, reg.ResolveLinks(topics)...)
+
+	eng, engDiags, err := loadEngine(cfg)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	diags = append(diags, engDiags...)
+	for _, t := range topics {
+		for _, sc := range t.Shortcodes {
+			diags = append(diags, eng.Validate(sc, t.SourcePath)...)
+		}
+	}
+	return topics, reg, eng, diags, nil
+}
+
+// Catalog returns the available template catalog (built-in plus project
+// overrides), for the `sitegen templates` command.
+func Catalog(cfg Config) ([]tmpl.Catalog, error) {
+	eng, _, err := loadEngine(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return eng.Catalogs(), nil
+}
+
+// Check performs fast validation only.
+func Check(cfg Config) (Result, error) {
+	topics, _, _, diags, err := index(cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Topics: len(topics), Diagnostics: diags}, nil
+}
+
+// Build generates the full site.
+func Build(cfg Config) (Result, error) {
+	topics, reg, eng, diags, err := index(cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	g := graph.Build(topics)
+
+	site := render.Site{Title: cfg.SiteTitle, BaseURL: cfg.BaseURL, AssetVersion: staticVersion(cfg)}
+	layout, err := loadLayout(cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	rd, err := render.New(site, eng, reg, g, topics, layout)
+	if err != nil {
+		return Result{}, err
+	}
+
+	if err := os.MkdirAll(cfg.OutDir, 0o755); err != nil {
+		return Result{}, err
+	}
+	c := cache.New()
+	if !cfg.Force {
+		c = cache.Load(cfg.OutDir)
+	}
+
+	res := Result{Topics: len(topics), Diagnostics: diags}
+	bySlug := map[string]*model.Topic{}
+	for _, t := range topics {
+		bySlug[t.Slug] = t
+	}
+
+	// Render topic pages (incremental).
+	for _, t := range topics {
+		fp := fingerprint(cfg, t, g, bySlug, eng.Hash(), layoutHash(layout), site.AssetVersion)
+		outFile := filepath.Join(cfg.OutDir, filepath.FromSlash(t.OutPath))
+		if !cfg.Force && c.PageFresh(t.OutPath, fp) && fileExists(outFile) {
+			res.Skipped++
+			c.PutPage(t.OutPath, fp)
+			continue
+		}
+		htmlBytes, pdiags := rd.Page(t)
+		res.Diagnostics = append(res.Diagnostics, pdiags...)
+		if err := writeFile(outFile, htmlBytes); err != nil {
+			return res, err
+		}
+		c.PutPage(t.OutPath, fp)
+		res.Rendered++
+	}
+
+	// Auto-generated listing pages (index, sections, tags).
+	listings := buildListings(rd, topics, bySlug, cfg)
+	for _, lp := range listings {
+		fp := hashStrings("listing", lp.fingerprint)
+		if !cfg.Force && c.PageFresh(lp.out, fp) && fileExists(filepath.Join(cfg.OutDir, filepath.FromSlash(lp.out))) {
+			res.Skipped++
+			c.PutPage(lp.out, fp)
+			continue
+		}
+		htmlBytes, err := rd.Listing(lp.title, lp.slug, lp.out, lp.intro, lp.cards)
+		if err != nil {
+			return res, err
+		}
+		if err := writeFile(filepath.Join(cfg.OutDir, filepath.FromSlash(lp.out)), htmlBytes); err != nil {
+			return res, err
+		}
+		c.PutPage(lp.out, fp)
+		res.Rendered++
+	}
+
+	// Static assets (built-in, then project theme overrides).
+	if err := copyStatic(cfg, c); err != nil {
+		return res, err
+	}
+
+	res.Diagnostics = dedupeDiags(res.Diagnostics)
+	if err := c.Save(cfg.OutDir); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+// --- fingerprint ---
+
+func fingerprint(cfg Config, t *model.Topic, g *graph.Graph, bySlug map[string]*model.Topic, engHash, layHash, assetVer string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "v2|%s|%s|%s|site=%s|assets=%s\n", t.ContentHash, engHash, layHash, cfg.SiteTitle, assetVer)
+	// outbound resolved targets affect rendering (path + dead state)
+	for _, l := range t.Links {
+		fmt.Fprintf(h, "L:%s>%s:%v\n", l.Target, l.ResolvedSlug, l.Dead)
+		if dst, ok := bySlug[l.ResolvedSlug]; ok {
+			fmt.Fprintf(h, "Lt:%s|%s\n", dst.OutPath, dst.Title)
+		}
+	}
+	for _, rel := range g.Related(t.Slug, 6) {
+		if dst, ok := bySlug[rel.Slug]; ok {
+			fmt.Fprintf(h, "R:%s|%s|%s\n", dst.OutPath, dst.Title, dst.Summary)
+		}
+	}
+	bl := append([]string(nil), g.Backlinks(t.Slug)...)
+	sort.Strings(bl)
+	for _, s := range bl {
+		if dst, ok := bySlug[s]; ok {
+			fmt.Fprintf(h, "B:%s|%s\n", dst.OutPath, dst.Title)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func layoutHash(layout map[string]string) string {
+	keys := make([]string, 0, len(layout))
+	for k := range layout {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s:%s\n", k, layout[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func hashStrings(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// --- listing pages ---
+
+type listingPage struct {
+	title, slug, out, intro string
+	cards                   []render.Card
+	fingerprint             string
+}
+
+func buildListings(rd *render.Renderer, topics []*model.Topic, bySlug map[string]*model.Topic, cfg Config) []listingPage {
+	var pages []listingPage
+
+	// Group topics by their parent directory for section indexes.
+	bySection := map[string][]*model.Topic{}
+	hasIndex := map[string]bool{}
+	var rootIndex bool
+	for _, t := range topics {
+		if t.Slug == "index" {
+			rootIndex = true
+		}
+		dir := path.Dir(t.Slug)
+		if dir == "." {
+			dir = ""
+		}
+		if strings.HasSuffix(t.OutPath, "/index.html") && t.Slug != "index" {
+			hasIndex[t.Slug] = true
+			continue
+		}
+		bySection[dir] = append(bySection[dir], t)
+	}
+
+	card := func(t *model.Topic) render.Card {
+		return render.Card{Title: t.Title, URL: t.OutPath, Summary: t.Summary}
+	}
+
+	// Root index, only if the author didn't write one.
+	if !rootIndex {
+		var cards []render.Card
+		var fp strings.Builder
+		for _, t := range sortedTopics(bySection[""]) {
+			cards = append(cards, card(t))
+			fp.WriteString(t.OutPath + t.Title + t.Summary + ";")
+		}
+		// also surface top-level sections as cards
+		for sec := range bySection {
+			if sec == "" || strings.Contains(sec, "/") {
+				continue
+			}
+			if idx, ok := bySlug[sec]; ok {
+				cards = append(cards, card(idx))
+			}
+		}
+		pages = append(pages, listingPage{
+			title: cfg.SiteTitle, slug: "index", out: "index.html",
+			intro: "Browse the knowledge base.", cards: cards, fingerprint: fp.String(),
+		})
+	}
+
+	// Section indexes for directories lacking an index.md.
+	for dir, members := range bySection {
+		if dir == "" || hasIndex[dir] {
+			continue
+		}
+		var cards []render.Card
+		var fp strings.Builder
+		for _, t := range sortedTopics(members) {
+			cards = append(cards, card(t))
+			fp.WriteString(t.OutPath + t.Title + t.Summary + ";")
+		}
+		pages = append(pages, listingPage{
+			title: humanizeSeg(path.Base(dir)), slug: dir, out: dir + "/index.html",
+			intro: "", cards: cards, fingerprint: fp.String(),
+		})
+	}
+
+	// Tag pages.
+	tagTopics := map[string][]*model.Topic{}
+	for _, t := range topics {
+		for _, tag := range t.Tags {
+			tagTopics[tag] = append(tagTopics[tag], t)
+		}
+	}
+	if len(tagTopics) > 0 {
+		var idxCards []render.Card
+		var idxFP strings.Builder
+		tags := make([]string, 0, len(tagTopics))
+		for tag := range tagTopics {
+			tags = append(tags, tag)
+		}
+		sort.Strings(tags)
+		for _, tag := range tags {
+			slug := parse.Slugify(tag)
+			out := "tags/" + slug + ".html"
+			var cards []render.Card
+			var fp strings.Builder
+			for _, t := range sortedTopics(tagTopics[tag]) {
+				cards = append(cards, card(t))
+				fp.WriteString(t.OutPath + t.Title + ";")
+			}
+			pages = append(pages, listingPage{
+				title: "#" + tag, slug: "tags/" + slug, out: out,
+				intro: fmt.Sprintf("Topics tagged %q.", tag), cards: cards, fingerprint: fp.String(),
+			})
+			idxCards = append(idxCards, render.Card{Title: "#" + tag, URL: slug + ".html",
+				Summary: fmt.Sprintf("%d topics", len(tagTopics[tag]))})
+			idxFP.WriteString(tag + fmt.Sprint(len(tagTopics[tag])) + ";")
+		}
+		pages = append(pages, listingPage{
+			title: "Tags", slug: "tags", out: "tags/index.html",
+			intro: "All tags.", cards: idxCards, fingerprint: idxFP.String(),
+		})
+	}
+	return pages
+}
+
+func sortedTopics(ts []*model.Topic) []*model.Topic {
+	out := append([]*model.Topic(nil), ts...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Weight != out[j].Weight {
+			return out[i].Weight < out[j].Weight
+		}
+		return out[i].Title < out[j].Title
+	})
+	return out
+}
+
+// --- engine / layout / assets loading ---
+
+func loadEngine(cfg Config) (*tmpl.Engine, []model.Diagnostic, error) {
+	eng := tmpl.New()
+	if err := eng.LoadFS(assets.FS, "templates"); err != nil {
+		return nil, nil, fmt.Errorf("loading built-in templates: %w", err)
+	}
+	var diags []model.Diagnostic
+	projDir := filepath.Join(cfg.ContentDir, "templates")
+	if isDir(projDir) {
+		if err := eng.LoadFS(os.DirFS(projDir), "."); err != nil {
+			diags = append(diags, model.Diagnostic{
+				Severity: model.SevError, File: "templates", Message: err.Error()})
+		}
+	}
+	return eng, diags, nil
+}
+
+func loadLayout(cfg Config) (map[string]string, error) {
+	layout, err := render.LoadLayout(assets.FS, "layout")
+	if err != nil {
+		return nil, err
+	}
+	projDir := filepath.Join(cfg.ContentDir, "layout")
+	if isDir(projDir) {
+		over, err := render.LoadLayout(os.DirFS(projDir), ".")
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range over {
+			layout[k] = v
+		}
+	}
+	return layout, nil
+}
+
+// staticVersion hashes all static assets (built-in + project theme overrides)
+// into a short token appended to asset URLs, so browsers fetch fresh CSS/JS
+// whenever they change and cache aggressively when they don't.
+func staticVersion(cfg Config) string {
+	h := sha256.New()
+	files := map[string][]byte{}
+	fs.WalkDir(assets.FS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, _ := assets.FS.ReadFile(p)
+		files[strings.TrimPrefix(p, "static/")] = b
+		return nil
+	})
+	themeDir := filepath.Join(cfg.ContentDir, "theme")
+	if isDir(themeDir) {
+		if ents, err := os.ReadDir(themeDir); err == nil {
+			for _, e := range ents {
+				if !e.IsDir() {
+					b, _ := os.ReadFile(filepath.Join(themeDir, e.Name()))
+					files[e.Name()] = b
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Fprintf(h, "%s:%x\n", n, sha256.Sum256(files[n]))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:10]
+}
+
+func copyStatic(cfg Config, c *cache.Cache) error {
+	write := func(name string, content []byte) error {
+		sum := sha256.Sum256(content)
+		h := hex.EncodeToString(sum[:])
+		dst := filepath.Join(cfg.OutDir, "static", name)
+		if c.AssetFresh(name, h) && fileExists(dst) {
+			return nil
+		}
+		if err := writeFile(dst, content); err != nil {
+			return err
+		}
+		c.PutAsset(name, h)
+		return nil
+	}
+	err := fs.WalkDir(assets.FS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, e := assets.FS.ReadFile(p)
+		if e != nil {
+			return e
+		}
+		return write(strings.TrimPrefix(p, "static/"), b)
+	})
+	if err != nil {
+		return err
+	}
+	// project theme overrides
+	themeDir := filepath.Join(cfg.ContentDir, "theme")
+	if isDir(themeDir) {
+		ents, _ := os.ReadDir(themeDir)
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(themeDir, e.Name()))
+			if err != nil {
+				return err
+			}
+			if err := write(e.Name(), b); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// --- file walking + io ---
+
+func collectMarkdown(cfg Config) ([]string, error) {
+	var files []string
+	root := cfg.ContentDir
+	absOut, _ := filepath.Abs(cfg.OutDir)
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if p != root && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || ignoredDirs[name]) {
+				return filepath.SkipDir
+			}
+			if abs, _ := filepath.Abs(p); abs == absOut {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, ".md") && !strings.HasPrefix(name, ".") &&
+			(!strings.HasPrefix(name, "_") || name == "_index.md") {
+			rel, _ := filepath.Rel(root, p)
+			files = append(files, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(files)
+	return files, err
+}
+
+func writeFile(p string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(p, content, 0o644)
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+func isDir(p string) bool      { fi, err := os.Stat(p); return err == nil && fi.IsDir() }
+
+func dedupeDiags(diags []model.Diagnostic) []model.Diagnostic {
+	seen := map[string]bool{}
+	var out []model.Diagnostic
+	for _, d := range diags {
+		k := fmt.Sprintf("%d|%s|%d|%s", d.Severity, d.File, d.Line, d.Message)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+func humanizeSeg(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "-", " "), "_", " ")
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}

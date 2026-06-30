@@ -1,0 +1,18 @@
+{{/* @doc Plot one or more functions y=f(x). fn is a JS expression in x (e.g. "Math.sin(x)"); separate multiple curves with ";;". */}}
+{{/* @param fn required */}}
+{{/* @param xmin default="-6.283" */}}
+{{/* @param xmax default="6.283" */}}
+{{/* @param ymin default="" */}}
+{{/* @param ymax default="" */}}
+{{/* @param samples default="400" */}}
+{{/* @param height default="320" */}}
+{{/* @param title default="" */}}
+{{/* @param caption default="" */}}
+<figure class="sg-figure sg-widget" data-widget="plot" data-config="{{ .ID }}-cfg">
+  {{- if .title }}<figcaption class="sg-fig-title">{{ .title }}</figcaption>{{ end }}
+  <canvas id="{{ .ID }}" class="sg-canvas" style="height:{{ .height }}px"></canvas>
+  <script type="application/json" id="{{ .ID }}-cfg">{{ json (dict
+    "fn" .fn "xmin" (float .xmin) "xmax" (float .xmax)
+    "ymin" .ymin "ymax" .ymax "samples" (int .samples)) }}</script>
+  {{- if .caption }}<figcaption>{{ .caption }}</figcaption>{{ end }}
+</figure>

@@ -1,0 +1,15 @@
+{{/* @doc A custom interactive canvas sketch. The inner block is JavaScript run every frame with these locals in scope: canvas, ctx, t (seconds since start), dt, W, H, mouse ({x,y,down}), and state (a persistent object). Use `if (frame===0) { ... }` for setup. */}}
+{{/* @param height default="360" */}}
+{{/* @param background default="transparent" */}}
+{{/* @param caption default="" */}}
+<figure class="sg-figure sg-widget sg-sketch" data-widget="sketch" data-config="{{ .ID }}-js" data-bg="{{ .background }}">
+  <div class="sg-sim-stage">
+    <canvas id="{{ .ID }}" class="sg-canvas" style="height:{{ .height }}px"></canvas>
+    <div class="sg-sim-controls" data-controls-for="{{ .ID }}">
+      <button class="sg-btn" data-act="toggle" title="Play/pause">⏸</button>
+      <button class="sg-btn" data-act="reset" title="Reset">↻</button>
+    </div>
+  </div>
+  <script type="application/sitegen-sketch" id="{{ .ID }}-js" data-b64="1">{{ b64 .InnerRaw }}</script>
+  {{- if .caption }}<figcaption>{{ .caption }}</figcaption>{{ end }}
+</figure>

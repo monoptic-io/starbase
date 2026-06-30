@@ -1,0 +1,12 @@
+# build output
+/_site/
+/site/
+demo/_site/
+**/.sitegen-cache.json
+
+# binaries
+/sitegen
+/dist/
+
+# OS
+.DS_Store

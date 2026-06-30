@@ -1,0 +1,14 @@
+{{/* @doc A self-check multiple-choice question. options are separated by "|"; answer is the 1-based index of the correct option. */}}
+{{/* @param question required */}}
+{{/* @param options required */}}
+{{/* @param answer required */}}
+{{/* @param explain default="" */}}
+<div class="sg-widget sg-quiz" data-widget="quiz" data-answer="{{ .answer }}">
+  <p class="sg-quiz-q">{{ .question }}</p>
+  <ul class="sg-quiz-options">
+    {{- range $i, $opt := (split "|" .options) }}
+    <li><button class="sg-quiz-opt" data-idx="{{ add $i 1 }}">{{ trim $opt }}</button></li>
+    {{- end }}
+  </ul>
+  {{- if .explain }}<div class="sg-quiz-explain" hidden>{{ .explain }}</div>{{ end }}
+</div>

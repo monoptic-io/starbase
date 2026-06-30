@@ -1,0 +1,7 @@
+{{/* @doc A display equation rendered with KaTeX. Provide LaTeX via the `tex` arg or the inner block. (Inline math: write $...$ directly in markdown.) */}}
+{{/* @param tex default="" */}}
+{{/* @param number default="" */}}
+<div class="sg-eq">
+  <div class="sg-math sg-math-display">{{ if .tex }}{{ .tex }}{{ else }}{{ .InnerRaw }}{{ end }}</div>
+  {{- if .number }}<span class="sg-eq-num">({{ .number }})</span>{{ end }}
+</div>

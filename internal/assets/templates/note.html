@@ -1,0 +1,7 @@
+{{/* @doc A callout / admonition box. Block form: inner markdown becomes the body. */}}
+{{/* @param kind default="note" */}}
+{{/* @param title default="" */}}
+<aside class="sg-note sg-note-{{ .kind }}">
+  {{- if .title }}<p class="sg-note-title">{{ .title }}</p>{{ end }}
+  <div class="sg-note-body">{{ .Inner }}</div>
+</aside>

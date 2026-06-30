@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ .Title }} · {{ .Site.Title }}</title>
+{{- if .Summary }}
+<meta name="description" content="{{ .Summary }}">
+{{- end }}
+<link rel="stylesheet" href="{{ .RootRel }}static/theme.css?v={{ .Site.AssetVersion }}">
+<script defer src="{{ .RootRel }}static/app.js?v={{ .Site.AssetVersion }}"></script>
+</head>
+<body>
+<button class="sg-menu-toggle" aria-label="Toggle navigation" onclick="document.body.classList.toggle('sg-nav-open')">☰</button>
+<div class="sg-shell">
+  <aside class="sg-sidebar">
+    <a class="sg-brand" href="{{ .RootRel }}index.html">{{ .Site.Title }}</a>
+    <input class="sg-filter" type="search" placeholder="Filter topics…" oninput="sgFilterNav(this.value)" aria-label="Filter topics">
+    <nav class="sg-nav">
+      {{- template "navtree" .Nav }}
+    </nav>
+  </aside>
+
+  <div class="sg-main-wrap">
+    <main class="sg-main">
+      {{- if .Breadcrumbs }}
+      <nav class="sg-breadcrumbs" aria-label="Breadcrumb">
+        {{- range $i, $c := .Breadcrumbs }}{{ if $i }}<span class="sep">/</span>{{ end }}<a href="{{ $.RootRel }}{{ $c.URL }}">{{ $c.Title }}</a>{{ end }}
+      </nav>
+      {{- end }}
+
+      <article class="sg-content">
+        <header class="sg-article-head">
+          <h1>{{ .Title }}</h1>
+          <div class="sg-meta">
+            {{- if .ReadingTime }}<span title="{{ .WordCount }} words">{{ .ReadingTime }} min read</span>{{ end }}
+            {{- range .Tags }}<a class="sg-tag" href="{{ $.RootRel }}tags/{{ . | slugify }}.html">#{{ . }}</a>{{ end }}
+          </div>
+          {{- if .Summary }}<p class="sg-summary">{{ .Summary }}</p>{{ end }}
+        </header>
+
+        {{- if .ShowTOC }}
+        <details class="sg-toc-inline" open>
+          <summary>Contents</summary>
+          {{ template "toc" .TOC }}
+        </details>
+        {{- end }}
+
+        {{ .ContentHTML }}
+      </article>
+
+      {{- if or .Related .Backlinks }}
+      <footer class="sg-explore">
+        {{- if .Related }}
+        <section class="sg-related">
+          <h2>Related topics</h2>
+          <ul>
+            {{- range .Related }}
+            <li><a href="{{ $.RootRel }}{{ .URL }}">{{ .Title }}</a>{{ if .Summary }}<span class="sg-rel-sum">{{ .Summary }}</span>{{ end }}</li>
+            {{- end }}
+          </ul>
+        </section>
+        {{- end }}
+        {{- if .Backlinks }}
+        <section class="sg-backlinks">
+          <h2>Referenced by</h2>
+          <ul>
+            {{- range .Backlinks }}<li><a href="{{ $.RootRel }}{{ .URL }}">{{ .Title }}</a></li>{{ end }}
+          </ul>
+        </section>
+        {{- end }}
+      </footer>
+      {{- end }}
+    </main>
+
+    {{- if .ShowTOC }}
+    <aside class="sg-toc-rail">
+      <div class="sg-toc-sticky">
+        <p class="sg-toc-label">On this page</p>
+        {{ template "toc" .TOC }}
+      </div>
+    </aside>
+    {{- end }}
+  </div>
+</div>
+</body>
+</html>
+
+{{- define "navtree" }}
+<ul>
+  {{- range .Children }}
+  <li class="{{ if .Children }}sg-nav-section{{ end }}{{ if .Active }} sg-active{{ end }}" data-name="{{ .Title | lower }}">
+    {{- if .URL }}<a href="{{ $.RootRel }}{{ .URL }}"{{ if .Active }} aria-current="page"{{ end }}>{{ .Title }}</a>
+    {{- else }}<span class="sg-nav-group">{{ .Title }}</span>{{ end }}
+    {{- if .Children }}{{ template "navtree" . }}{{ end }}
+  </li>
+  {{- end }}
+</ul>
+{{- end }}
+
+{{- define "toc" }}
+<ul class="sg-toc">
+  {{- range . }}
+  <li class="sg-toc-h{{ .Level }}"><a href="#{{ .Slug }}">{{ .Text }}</a></li>
+  {{- end }}
+</ul>
+{{- end }}

@@ -1,0 +1,16 @@
+{{/* @doc A built-in interactive simulation. name selects the simulation: pendulum, doublependulum, lorenz, life, nbody, vectorfield. Extra args are passed as config. */}}
+{{/* @params open */}}
+{{/* @param name required */}}
+{{/* @param height default="420" */}}
+{{/* @param caption default="" */}}
+<figure class="sg-figure sg-widget sg-sim" data-widget="sim" data-config="{{ .ID }}-cfg">
+  <div class="sg-sim-stage">
+    <canvas id="{{ .ID }}" class="sg-canvas" style="height:{{ .height }}px"></canvas>
+    <div class="sg-sim-controls" data-controls-for="{{ .ID }}">
+      <button class="sg-btn" data-act="toggle" title="Play/pause">⏸</button>
+      <button class="sg-btn" data-act="reset" title="Reset">↻</button>
+    </div>
+  </div>
+  <script type="application/json" id="{{ .ID }}-cfg">{{ json .Args }}</script>
+  {{- if .caption }}<figcaption>{{ .caption }}</figcaption>{{ end }}
+</figure>

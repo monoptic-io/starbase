@@ -1,0 +1,8 @@
+{{/* @doc A figure with an optional caption. Use for images or block content. */}}
+{{/* @param src default="" */}}
+{{/* @param alt default="" */}}
+{{/* @param caption default="" */}}
+<figure class="sg-figure">
+  {{- if .src }}<img src="{{ .src }}" alt="{{ .alt }}" loading="lazy">{{ else }}{{ .Inner }}{{ end }}
+  {{- if .caption }}<figcaption>{{ .caption }}</figcaption>{{ end }}
+</figure>
