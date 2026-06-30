@@ -50,8 +50,10 @@ func usage() {
 Commands:
   build <content-dir>   Generate the static site (incremental).
   check <content-dir>   Fast validation: report dead links and bad template calls.
-  verify <content-dir>  Re-run the evidence/ program and diff every claim's
+  verify <content-dir>  Re-run the evidence/ checks and diff every claim's
                         embedded result against the freshly computed output.
+                        -v lists each check/claim; -show <check> prints a
+                        check's raw stdout to copy into its result block.
   templates [dir]       List available shortcode templates and their arguments.
 
 Run "starbase build -h" or "starbase check -h" for flags.
@@ -155,7 +157,7 @@ func runCheck(args []string) int {
 func reorder(args []string) []string {
 	valueFlags := map[string]bool{
 		"-o": true, "--o": true, "-title": true, "--title": true,
-		"-base": true, "--base": true,
+		"-base": true, "--base": true, "-show": true, "--show": true,
 	}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
@@ -177,15 +179,47 @@ func runVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	drafts := fs.Bool("drafts", false, "include draft topics")
 	force := fs.Bool("force", false, "re-run all evidence units, ignoring the cache")
+	verbose := fs.Bool("v", false, "list each evidence check and claim outcome")
+	show := fs.String("show", "", "print one check's raw stdout (to copy into a result block) and exit")
 	fs.Parse(reorder(args))
 
 	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, Force: *force, OutDir: "_site"}
+
+	// -show: capture a check's output for pasting into its claim's result block.
+	if *show != "" {
+		out, err := build.ShowCheck(cfg, *show)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
+			return 1
+		}
+		os.Stdout.WriteString(out)
+		return 0
+	}
+
 	res, err := build.Verify(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
 		return 1
 	}
 	printDiagnostics(res.Diagnostics)
+	if *verbose {
+		for _, u := range res.Units {
+			state := "ran"
+			if u.Err != "" {
+				state = "FAILED"
+			} else if u.Cached {
+				state = "cached"
+			}
+			fmt.Printf("  check %-28s %s\n", u.Name, state)
+		}
+		for _, c := range res.Claims {
+			where := c.File
+			if c.Line > 0 {
+				where = fmt.Sprintf("%s:%d", c.File, c.Line)
+			}
+			fmt.Printf("  claim %-28s %s (%s)\n", c.Check, c.State, where)
+		}
+	}
 	fmt.Printf("evidence: %d unit(s) run, %d cached\n", res.UnitsRun, res.UnitsCached)
 	fmt.Printf("verified %d claim(s), %d attested (not re-run): %d error(s)\n",
 		res.Verified, res.Attested, res.Errors())

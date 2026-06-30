@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/monoptic-io/starbase/internal/assets"
 	"github.com/monoptic-io/starbase/internal/cache"
@@ -46,11 +47,42 @@ type Result struct {
 	Topics      int
 	Rendered    int
 	Skipped     int
-	Verified    int // claims re-executed and matched
-	Attested    int // claims with evidence attached but no re-runnable check
-	UnitsRun    int // evidence units executed this run
-	UnitsCached int // evidence units served from cache (inputs unchanged)
+	Verified    int             // claims re-executed and matched
+	Attested    int             // claims with evidence attached but no re-runnable check
+	UnitsRun    int             // evidence units executed this run
+	UnitsCached int             // evidence units served from cache (inputs unchanged)
+	Units       []evidence.Unit // per-check status (for -v)
+	Claims      []ClaimStatus   // per-claim outcome (for -v)
 	Diagnostics []model.Diagnostic
+}
+
+// ClaimStatus is one claim's verification outcome, for the verbose listing.
+type ClaimStatus struct {
+	Check string
+	File  string
+	Line  int
+	State string // "verified" | "attested" | "failed"
+}
+
+// ShowCheck runs the evidence checks and returns the named check's raw stdout —
+// for capturing into a claim's result block. It reuses the cache (a check re-runs
+// only if its inputs changed), so it's cheap to call in an authoring loop.
+func ShowCheck(cfg Config, name string) (string, error) {
+	rr, present, err := evidence.Run(cfg.ContentDir, false)
+	if err != nil {
+		return "", err
+	}
+	if !present {
+		return "", fmt.Errorf("no evidence/ directory under %s", cfg.ContentDir)
+	}
+	ck, ok := rr.Checks[name]
+	if !ok {
+		return "", fmt.Errorf("no evidence check named %q (looked for evidence/%s/run)", name, name)
+	}
+	if ck.Err != "" {
+		return "", fmt.Errorf("check %q failed: %s", name, ck.Err)
+	}
+	return ck.Output, nil
 }
 
 func (r Result) Errors() (n int) {
@@ -150,6 +182,7 @@ func Verify(cfg Config) (Result, error) {
 		res.Diagnostics = dedupeDiags(res.Diagnostics)
 		return res, nil
 	}
+	res.Units = rr.Units
 	for _, u := range rr.Units {
 		if u.Err != "" {
 			res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
@@ -171,12 +204,15 @@ func Verify(cfg Config) (Result, error) {
 			if info.Check == "" {
 				if info.HasImpl || info.Source != "" {
 					res.Attested++
+					res.Claims = append(res.Claims, ClaimStatus{File: t.SourcePath, Line: sc.Line, State: "attested"})
 				}
 				continue
 			}
 			ck, ok := rr.Checks[info.Check]
 			if present && ok && ck.Err != "" {
-				continue // the failing run is already reported at evidence/<name>/run
+				// the failing run is already reported at evidence/<name>/run
+				res.Claims = append(res.Claims, ClaimStatus{Check: info.Check, File: t.SourcePath, Line: sc.Line, State: "failed"})
+				continue
 			}
 			err := func() string {
 				if !present {
@@ -190,8 +226,10 @@ func Verify(cfg Config) (Result, error) {
 			if err != "" {
 				res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
 					Severity: model.SevError, File: t.SourcePath, Line: sc.Line, Message: err})
+				res.Claims = append(res.Claims, ClaimStatus{Check: info.Check, File: t.SourcePath, Line: sc.Line, State: "failed"})
 			} else {
 				res.Verified++
+				res.Claims = append(res.Claims, ClaimStatus{Check: info.Check, File: t.SourcePath, Line: sc.Line, State: "verified"})
 			}
 		}
 	}
@@ -206,20 +244,48 @@ func firstLine(s string) string {
 	return s
 }
 
-// compareClaim returns "" if the text a claim embeds matches the check's output,
-// else a description of the discrepancy. The contract is a trimmed-exact text
-// comparison — the program prints bytes, the article embeds the expected bytes.
-// The expected text is the claim's result block if it has one, else its value.
+// compareClaim returns "" if everything a claim embeds is backed by the check's
+// output, else a description of the discrepancy. Both the result block and the
+// asserted value are checked, so an honest result block can't launder a
+// fabricated headline:
+//   - a result block (if present) must match the output exactly (trimmed); and
+//   - the asserted value (if present) must appear, as a whole word, in the output.
 func compareClaim(info claim.Info, ck evidence.Check) string {
-	want := strings.TrimSpace(info.Result)
-	if want == "" {
-		want = info.Value
+	result := strings.TrimSpace(info.Result)
+	value := strings.TrimSpace(info.Value)
+	if result == "" && value == "" {
+		return fmt.Sprintf("claim check %q ran, but the claim embeds nothing to verify against it — add a result block or value=", info.Check)
 	}
-	if normalizeText(ck.Output) != normalizeText(want) {
+	if result != "" && normalizeText(ck.Output) != normalizeText(result) {
 		return fmt.Sprintf("claim check %q: the article's result does not match the computation\n           article:  %s\n           computed: %s",
-			info.Check, oneLine(want), oneLine(ck.Output))
+			info.Check, oneLine(result), oneLine(ck.Output))
+	}
+	if value != "" && !valueInText(value, ck.Output) {
+		return fmt.Sprintf("claim check %q: the asserted value %q does not appear in the computation: %s",
+			info.Check, value, oneLine(ck.Output))
 	}
 	return ""
+}
+
+// valueInText reports whether value occurs as a whole word in text, after
+// normalizing both: lower-cased, with everything but letters, digits, '.', '%'
+// and '-' turned to spaces. So "maxdev 1.7%" matches output "maxdev=1.7%", and
+// "29.1%" matches "(29.1%)", but "4" does not match "42".
+func valueInText(value, text string) bool {
+	nv, nt := normWords(value), normWords(text)
+	return nv != "" && strings.Contains(" "+nt+" ", " "+nv+" ")
+}
+
+func normWords(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '%' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune(' ')
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // normalizeText trims trailing whitespace per line and overall, and normalizes

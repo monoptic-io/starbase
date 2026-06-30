@@ -20,16 +20,20 @@ its result. starbase runs nothing — *you* run the code; the shortcode surfaces
 
 ## Syntax
 
+Lead with a **verifiable** claim — one bound to a `check` (the next section
+explains the `evidence/` side). The same shape without `check=` is merely
+*attested*: shown, but not re-run.
+
 ````markdown
-{{< claim value="4" source="data/sales.csv" asof="2026-06-30" >}}
+{{< claim value="4" check="midwest-regions" source="data/sales.csv" asof="2026-06-30" >}}
 The **Midwest** division is served by **4** distinct sales regions.
 
-```sql
-SELECT count(*) AS regions FROM sales WHERE division = 'Midwest';
+```sh
+# evidence/midwest-regions/run
+awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' sales.csv
 ```
 
 ```result
-regions
 4
 ```
 {{< /claim >}}
@@ -37,12 +41,19 @@ regions
 
 - The **prose** (the statement, with the value in it) renders inline with an
   *evidence* badge and a *How we know this* disclosure.
-- The first non-result fenced block is the **implementation** (any language —
-  `sql`, `python`, `bash`, …), shown verbatim in the drawer.
-- A fence tagged `result` / `csv` / `tsv` / `table` is the **captured result**,
-  rendered as a table (or a single value).
-- Args: `value` (the asserted value — checked against the result), `source`
-  (the dataset/notebook/file), `asof` (when you ran it).
+- The first non-result fenced block is the **implementation** (any language),
+  shown verbatim in the drawer. Make it the *real* command `run` executes.
+- A fence tagged `result` / `csv` / `tsv` / `table` is the **captured result** —
+  the text `verify` compares against the check's stdout (see below).
+- Args: `check` (the `evidence/` directory that recomputes and verifies this);
+  `value` (the asserted headline value); `source` (the dataset/file); `asof`.
+- **`value` is verified, not decorative.** With a `check`, `verify` enforces
+  *both*: the `result` block (if present) must match the check's stdout exactly,
+  **and** `value` (if present) must appear as a whole word in that stdout. So an
+  honest result block can't launder a fabricated headline — change the bolded
+  number and the build fails. Matching ignores whitespace/punctuation:
+  `value="maxdev 1.7%"` matches output `maxdev=1.7%` and `value="29.1%"` matches
+  `(29.1%)`, but `value="4"` does *not* match `42`. Pick a distinctive token.
 
 ## Verifiable claims (don't make the reader trust you)
 
@@ -68,18 +79,40 @@ evidence/midwest-regions/run           # chmod +x — needs a #! line
 ```
 
 Each input is resolved by a **provider** (file or http) and staged into a fresh
-working directory under its basename; `verify` runs `./run` **there**, so it reads
-inputs by name (`sales.csv`) and sees nothing else. It compares `run`'s **stdout,
-trimmed, against the result the claim embeds** — its result block if it has one,
-else its `value`. The comparison is **exact text**, not numeric: `11.4M` does
-*not* match `11400000`, so make both sides agree (let the program print what the
-prose says, or vice-versa). A non-zero exit — or an input that won't resolve (a
-missing file, a 404) — is a check failure, reported at `evidence/<check>/run`.
-Because the contract is text, the program can be a shell one-liner over DuckDB, a
-Python script, a compiled binary — whatever fits.
+**per-check** working directory under its basename; `verify` runs `./run` **there**,
+so it reads inputs by name (`sales.csv`) and sees nothing else — two checks
+declaring the same file never collide. It compares `run`'s **stdout against the
+result the claim embeds** — its result block if it has one, else its `value`. The
+comparison is **exact text**, not numeric: `11.4M` does *not* match `11400000`, so
+make both sides agree. The only leniency is whitespace: a trailing newline and
+trailing spaces *per line* are ignored; **leading and internal spacing is
+significant** (so column-pad consistently, or don't). A non-zero exit — or an input
+that won't resolve (a missing file, a 404) — is a check failure, reported at
+`evidence/<check>/run`. `run` must be `chmod +x` and have a `#!` line, or you get
+a clear "run is not executable" error. Because the contract is text, the program
+can be a shell one-liner over DuckDB, a Python script, a compiled binary.
+
+A non-awk example (reach for python when the analysis outgrows an awk one-liner —
+`exp`, `log`, and friends are awk reserved words and bite):
+
+```python
+#!/usr/bin/env python3
+# evidence/digit-entropy/run     (inputs: data/world-figures.csv -> figures.csv)
+import csv, math
+counts = [0]*9
+for row in csv.reader(open("figures.csv")):
+    d = next((c for c in row[-1] if c.isdigit() and c != "0"), None)
+    if d: counts[int(d)-1] += 1
+n = sum(counts)
+h = -sum((c/n)*math.log2(c/n) for c in counts if c)
+print(f"{h:.3f}")
+```
 
 Show the reader the *real* command — paste `run` (or its core) as the claim's
-implementation, so the drawer matches what the build executes.
+implementation, so the drawer matches what the build executes. **Don't hand-copy
+the output**: run `starbase verify <dir> -show <check>` to print the check's exact
+stdout and paste that into the `result` block — byte-for-byte, no transcription
+errors.
 
 ### Incremental, like `go test`
 
@@ -91,6 +124,11 @@ one of those changes:
 - editing one check's `run` re-runs only that check;
 - changing a declared input re-runs every check that uses it.
 
+The cache is by **content, not mtime** — `touch run` will *not* re-run a check
+(you'll see it `cached`); change the bytes to invalidate. Use `verify -v` to see
+each check as `ran`/`cached` and each claim as `verified`/`attested`/`failed`, so
+"nothing re-ran" never looks like a bug.
+
 **One expensive check per directory** so a minutes-long run isn't re-run when you
 touch something else. A fetched URL is treated as immutable between builds — a
 local `verify` reuses the cached bytes rather than re-fetching. That's safe
@@ -99,8 +137,10 @@ because the cache is only a local convenience: CI starts cold, re-fetches, and t
 you let the build fail when the recomputed output stops matching the article.
 
 ```sh
-starbase verify <dir>          # re-runs only changed checks; diffs every checked claim
-starbase verify <dir> -force   # ignore the cache, re-fetch URLs, re-run everything
+starbase verify <dir>             # re-runs only changed checks; diffs every checked claim
+starbase verify <dir> -v          # + list every check (ran/cached) and claim outcome
+starbase verify <dir> -show <chk>  # print a check's exact stdout (to copy into a result block)
+starbase verify <dir> -force      # ignore the cache, re-fetch URLs, re-run everything
 ```
 
 Wire `verify` into CI. A claim with a `check` that re-executes and matches is
@@ -115,6 +155,12 @@ coordination signal: one agent can assert something and mark it a claim, and
 another agent (or a later pass) picks up the warning, runs the analysis, and
 attaches the query — or discovers the number is wrong and corrects it. If `value`
 disagrees with a scalar result, `check` warns about the drift.
+
+So under `check -strict`, **every `{{< claim >}}` must carry evidence** — an
+implementation, a `source`, or a `check` — or the build fails on the warning.
+Don't wrap a pure assertion ("Benford's formula is log10(1+1/d)") in a claim
+unless you intend to back it; write it as ordinary prose instead. A claim is a
+promise to support a number, not emphasis.
 
 So the loop mirrors topic-writing:
 

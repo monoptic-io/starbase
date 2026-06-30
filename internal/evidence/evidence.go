@@ -85,8 +85,11 @@ func Run(contentDir string, force bool) (Result, bool, error) {
 		}
 		dir := filepath.Join(evDir, name)
 		runPath := filepath.Join(dir, "run")
-		if !isExecutable(runPath) {
-			continue // a directory without an executable run is not a check
+		if fi, err := os.Stat(runPath); err != nil || !fi.Mode().IsRegular() {
+			continue // a directory without a run file is not a check
+		} else if fi.Mode().Perm()&0o111 == 0 {
+			record(name, Check{Err: "run is not executable — `chmod +x` it"}, false)
+			continue
 		}
 		runBytes, err := os.ReadFile(runPath)
 		if err != nil {
@@ -181,11 +184,6 @@ func computeKey(runBytes, manifest []byte, inputs []resolved) string {
 		fmt.Fprintf(h, "\x00%s\x00%s", r.LocalName, r.Hash)
 	}
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-func isExecutable(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
 }
 
 // execScript runs an executable with the given working directory, returning

@@ -32,4 +32,6 @@ jobs:
         run: go run ./cmd/starbase check demo -strict
 
       - name: Verify evidence-backed claims (re-runs the evidence checks)
-        run: go run ./cmd/starbase verify examples/sales-research
+        run: |
+          go run ./cmd/starbase verify examples/sales-research
+          go run ./cmd/starbase verify demo

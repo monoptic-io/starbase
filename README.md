@@ -120,8 +120,12 @@ input, so a minutes-long check re-runs only when one of those changes — never 
 you edit an unrelated page. Fetched URLs are treated as immutable between builds
 (a local verify reuses the cached bytes); the cache is a local convenience, and CI
 starts cold, so the **output comparison** — not input pinning — is what catches a
-source that has drifted. Claims sort into **unsupported → attested → verified**.
-See `examples/sales-research/` and the `research-claims` skill.
+source that has drifted. Caching is by **content, not mtime** (`touch` won't
+re-run a check). Claims sort into **unsupported → attested → verified**.
+
+When authoring, `starbase verify <dir> -show <check>` prints a check's exact
+stdout to paste into its result block, and `-v` lists every check (ran/cached) and
+claim outcome. See `examples/sales-research/` and the `research-claims` skill.
 
 ## Third-party assets & offline builds
 

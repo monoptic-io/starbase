@@ -1,0 +1,24 @@
+#!/bin/sh
+# inputs: data/world-figures.csv  (staged here as world-figures.csv)
+# Leading-digit distribution of 292 real-world figures (country populations and
+# land areas) compared against Benford's law P(d)=log10(1+1/d), with a
+# chi-square goodness-of-fit statistic and the largest single-digit deviation.
+LC_ALL=C awk -F, '
+NR>1 {
+  v=$3; sub(/^[^1-9]*/, "", v); d = substr(v,1,1) + 0
+  if (d>=1 && d<=9) { c[d]++; n++ }
+}
+END {
+  split("0.301 0.176 0.125 0.097 0.079 0.067 0.058 0.051 0.046", b, " ")
+  print "digit  count  observed  benford"
+  chi2 = 0; maxdev = 0
+  for (d=1; d<=9; d++) {
+    obs = c[d] / n
+    ex = n * b[d]
+    chi2 += (c[d]-ex)*(c[d]-ex) / ex
+    dev = obs*100 - b[d]*100; if (dev<0) dev = -dev
+    if (dev > maxdev) maxdev = dev
+    printf "%d      %5d   %6.1f%%   %5.1f%%\n", d, c[d], obs*100, b[d]*100
+  }
+  printf "N=%d  chi2=%.2f  maxdev=%.1f%%\n", n, chi2, maxdev
+}' world-figures.csv

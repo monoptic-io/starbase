@@ -28,6 +28,7 @@ The structure shows up everywhere once you look. The aimless stagger of a [[Rand
 - [[Monte Carlo Method]] — computing hard answers by rolling dice.
 - [[Bayes' Theorem]] — turning evidence into updated belief.
 - [[Galton Board]] — the central limit theorem made of falling beads.
+- [[Benford's Law]] — why real-world numbers begin with the digit 1 about 30% of the time.
 
 ## How it connects
 
