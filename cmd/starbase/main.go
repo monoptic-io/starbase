@@ -1,12 +1,12 @@
-// Command sitegen builds a highly interactive but fully static knowledge base
+// Command starbase builds a highly interactive but fully static knowledge base
 // from a tree of markdown files. It is designed for agents: every problem it
 // finds (dead links, missing template arguments, broken templates) is reported
 // precisely so the content can be iterated to completion.
 //
 // Usage:
 //
-//	sitegen build [flags] <content-dir>   generate the site
-//	sitegen check [flags] <content-dir>   fast validation only (no rendering)
+//	starbase build [flags] <content-dir>   generate the site
+//	starbase check [flags] <content-dir>   fast validation only (no rendering)
 package main
 
 import (
@@ -17,8 +17,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ryannedolan/sitegen/internal/build"
-	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/monoptic-io/starbase/internal/build"
+	"github.com/monoptic-io/starbase/internal/model"
 )
 
 func main() {
@@ -36,21 +36,21 @@ func main() {
 	case "help", "-h", "--help":
 		usage()
 	default:
-		fmt.Fprintf(os.Stderr, "sitegen: unknown command %q\n\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "starbase: unknown command %q\n\n", os.Args[1])
 		usage()
 		os.Exit(2)
 	}
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `sitegen — a static knowledge-base generator for agents
+	fmt.Fprint(os.Stderr, `starbase — a static knowledge-base generator for agents
 
 Commands:
   build <content-dir>   Generate the static site (incremental).
   check <content-dir>   Fast validation: report dead links and bad template calls.
   templates [dir]       List available shortcode templates and their arguments.
 
-Run "sitegen build -h" or "sitegen check -h" for flags.
+Run "starbase build -h" or "starbase check -h" for flags.
 `)
 }
 
@@ -59,7 +59,7 @@ func runTemplates(args []string) int {
 	fs.Parse(reorder(args))
 	cats, err := build.Catalog(build.Config{ContentDir: contentDir(fs), OutDir: "_site"})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sitegen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
 		return 1
 	}
 	for _, c := range cats {
@@ -94,6 +94,8 @@ func runBuild(args []string) int {
 	force := fs.Bool("force", false, "ignore cache and rebuild everything")
 	strict := fs.Bool("strict", false, "exit non-zero on warnings too")
 	quiet := fs.Bool("quiet", false, "only print diagnostics and summary")
+	vendorAssets := fs.Bool("vendor", false, "download and bundle third-party assets (e.g. KaTeX) locally for a self-contained, offline site instead of linking a CDN")
+	offline := fs.Bool("offline", false, "with -vendor, use only previously cached downloads (never hit the network)")
 	fs.Parse(reorder(args))
 
 	cfg := build.Config{
@@ -103,10 +105,12 @@ func runBuild(args []string) int {
 		BaseURL:    *baseURL,
 		Drafts:     *drafts,
 		Force:      *force,
+		Vendor:     *vendorAssets,
+		Offline:    *offline,
 	}
 	res, err := build.Build(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sitegen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
 		return 1
 	}
 	printDiagnostics(res.Diagnostics)
@@ -130,7 +134,7 @@ func runCheck(args []string) int {
 	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, OutDir: "_site"}
 	res, err := build.Check(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sitegen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
 		return 1
 	}
 	printDiagnostics(res.Diagnostics)

@@ -1,0 +1,32 @@
+name: CI
+
+# Pre-merge checks: build, vet, test, and validate the demo knowledge base
+# (fast validation only — links + template arguments — without rendering it).
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Validate demo site (no render)
+        run: go run ./cmd/starbase check demo -strict

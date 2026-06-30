@@ -22,7 +22,7 @@ func New() *Cache {
 
 // Load reads the cache from dir, returning a fresh one if absent or stale.
 func Load(dir string) *Cache {
-	b, err := os.ReadFile(filepath.Join(dir, ".sitegen-cache.json"))
+	b, err := os.ReadFile(filepath.Join(dir, ".starbase-cache.json"))
 	if err != nil {
 		return New()
 	}
@@ -42,7 +42,7 @@ func (c *Cache) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, ".sitegen-cache.json"), b, 0o644)
+	return os.WriteFile(filepath.Join(dir, ".starbase-cache.json"), b, 0o644)
 }
 
 // PageFresh reports whether the page's fingerprint matches the cached one.

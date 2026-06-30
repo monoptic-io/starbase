@@ -1,4 +1,4 @@
-module github.com/ryannedolan/sitegen
+module github.com/monoptic-io/starbase
 
 go 1.26.4
 

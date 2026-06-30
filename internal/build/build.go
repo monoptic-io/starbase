@@ -1,4 +1,4 @@
-// Package build orchestrates the two sitegen commands:
+// Package build orchestrates the two starbase commands:
 //
 //   - Check: fast validation — parse, resolve links, validate shortcode args.
 //     Reports missing topics and bad template calls without rendering anything.
@@ -17,14 +17,15 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ryannedolan/sitegen/internal/assets"
-	"github.com/ryannedolan/sitegen/internal/cache"
-	"github.com/ryannedolan/sitegen/internal/graph"
-	"github.com/ryannedolan/sitegen/internal/model"
-	"github.com/ryannedolan/sitegen/internal/parse"
-	"github.com/ryannedolan/sitegen/internal/registry"
-	"github.com/ryannedolan/sitegen/internal/render"
-	"github.com/ryannedolan/sitegen/internal/tmpl"
+	"github.com/monoptic-io/starbase/internal/assets"
+	"github.com/monoptic-io/starbase/internal/cache"
+	"github.com/monoptic-io/starbase/internal/graph"
+	"github.com/monoptic-io/starbase/internal/model"
+	"github.com/monoptic-io/starbase/internal/parse"
+	"github.com/monoptic-io/starbase/internal/registry"
+	"github.com/monoptic-io/starbase/internal/render"
+	"github.com/monoptic-io/starbase/internal/tmpl"
+	"github.com/monoptic-io/starbase/internal/vendor"
 )
 
 type Config struct {
@@ -34,6 +35,8 @@ type Config struct {
 	BaseURL    string
 	Drafts     bool
 	Force      bool // ignore cache, rebuild everything
+	Vendor     bool // download + bundle third-party assets locally instead of linking a CDN
+	Offline    bool // with Vendor, use only cached downloads (never hit the network)
 }
 
 type Result struct {
@@ -104,7 +107,7 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 }
 
 // Catalog returns the available template catalog (built-in plus project
-// overrides), for the `sitegen templates` command.
+// overrides), for the `starbase templates` command.
 func Catalog(cfg Config) ([]tmpl.Catalog, error) {
 	eng, _, err := loadEngine(cfg)
 	if err != nil {
@@ -130,7 +133,14 @@ func Build(cfg Config) (Result, error) {
 	}
 	g := graph.Build(topics)
 
-	site := render.Site{Title: cfg.SiteTitle, BaseURL: cfg.BaseURL, AssetVersion: staticVersion(cfg)}
+	katexBase := vendor.KaTeXCDN
+	if cfg.Vendor {
+		katexBase = "" // empty tells the page to use the locally vendored copy
+	}
+	site := render.Site{
+		Title: cfg.SiteTitle, BaseURL: cfg.BaseURL,
+		AssetVersion: staticVersion(cfg), KaTeXBase: katexBase,
+	}
 	layout, err := loadLayout(cfg)
 	if err != nil {
 		return Result{}, err
@@ -195,6 +205,14 @@ func Build(cfg Config) (Result, error) {
 	// Static assets (built-in, then project theme overrides).
 	if err := copyStatic(cfg, c); err != nil {
 		return res, err
+	}
+
+	// Vendored third-party assets (KaTeX), only with --vendor. A failure here
+	// degrades gracefully: pages still build, math just falls back to its raw TeX.
+	if cfg.Vendor {
+		if d := vendorAssets(cfg, c); d != nil {
+			res.Diagnostics = append(res.Diagnostics, *d)
+		}
 	}
 
 	res.Diagnostics = dedupeDiags(res.Diagnostics)
@@ -447,23 +465,28 @@ func staticVersion(cfg Config) string {
 	for _, n := range names {
 		fmt.Fprintf(h, "%s:%x\n", n, sha256.Sum256(files[n]))
 	}
+	// Math source (CDN vs vendored, and KaTeX version) affects page output too.
+	fmt.Fprintf(h, "katex:%s:vendor=%v\n", vendor.KaTeXVersion, cfg.Vendor)
 	return hex.EncodeToString(h.Sum(nil))[:10]
 }
 
-func copyStatic(cfg Config, c *cache.Cache) error {
-	write := func(name string, content []byte) error {
-		sum := sha256.Sum256(content)
-		h := hex.EncodeToString(sum[:])
-		dst := filepath.Join(cfg.OutDir, "static", name)
-		if c.AssetFresh(name, h) && fileExists(dst) {
-			return nil
-		}
-		if err := writeFile(dst, content); err != nil {
-			return err
-		}
-		c.PutAsset(name, h)
+// writeStatic writes one asset under <out>/static/<name>, skipping it when the
+// cache shows the same content is already on disk.
+func writeStatic(cfg Config, c *cache.Cache, name string, content []byte) error {
+	sum := sha256.Sum256(content)
+	h := hex.EncodeToString(sum[:])
+	dst := filepath.Join(cfg.OutDir, "static", filepath.FromSlash(name))
+	if c.AssetFresh(name, h) && fileExists(dst) {
 		return nil
 	}
+	if err := writeFile(dst, content); err != nil {
+		return err
+	}
+	c.PutAsset(name, h)
+	return nil
+}
+
+func copyStatic(cfg Config, c *cache.Cache) error {
 	err := fs.WalkDir(assets.FS, "static", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -472,7 +495,7 @@ func copyStatic(cfg Config, c *cache.Cache) error {
 		if e != nil {
 			return e
 		}
-		return write(strings.TrimPrefix(p, "static/"), b)
+		return writeStatic(cfg, c, strings.TrimPrefix(p, "static/"), b)
 	})
 	if err != nil {
 		return err
@@ -489,8 +512,30 @@ func copyStatic(cfg Config, c *cache.Cache) error {
 			if err != nil {
 				return err
 			}
-			if err := write(e.Name(), b); err != nil {
+			if err := writeStatic(cfg, c, e.Name(), b); err != nil {
 				return err
+			}
+		}
+	}
+	return nil
+}
+
+// vendorAssets downloads (or loads from cache) the third-party front-end assets
+// and writes them under <out>/static. Returns a warning diagnostic on failure
+// rather than aborting the build.
+func vendorAssets(cfg Config, c *cache.Cache) *model.Diagnostic {
+	files, err := vendor.EnsureKaTeX(cfg.Offline)
+	if err != nil {
+		return &model.Diagnostic{
+			Severity: model.SevWarn, File: "(vendor)",
+			Message: fmt.Sprintf("could not vendor KaTeX; math will not render: %v", err),
+		}
+	}
+	for _, f := range files {
+		if err := writeStatic(cfg, c, f.RelPath, f.Content); err != nil {
+			return &model.Diagnostic{
+				Severity: model.SevWarn, File: "(vendor)",
+				Message: fmt.Sprintf("writing vendored asset %s: %v", f.RelPath, err),
 			}
 		}
 	}

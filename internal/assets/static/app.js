@@ -1,4 +1,4 @@
-/* sitegen runtime: navigation, math, and interactive widgets. Vanilla JS, no build step. */
+/* starbase runtime: navigation, math, and interactive widgets. Vanilla JS, no build step. */
 (function () {
   "use strict";
 
@@ -78,15 +78,20 @@
     return base + name + (v ? "?v=" + v : "");
   }
 
-  /* ---------------- math (KaTeX, vendored locally — fully offline) ---------------- */
+  /* ---------------- math (KaTeX) ----------------
+     Source is chosen by the build: data-katex holds a CDN base URL by default,
+     or is empty when assets are vendored locally (--vendor) for offline use. */
   function initMath() {
     var nodes = document.querySelectorAll(".sg-math-inline, .sg-math-display");
     if (!nodes.length) return;
+    var base = document.documentElement.getAttribute("data-katex");
+    var cssHref = base ? base + "katex.min.css" : assetRef("katex/katex.min.css");
+    var jsSrc = base ? base + "katex.min.js" : assetRef("katex/katex.min.js");
     var css = document.createElement("link");
-    css.rel = "stylesheet"; css.href = assetRef("katex/katex.min.css");
+    css.rel = "stylesheet"; css.href = cssHref;
     document.head.appendChild(css);
     var s = document.createElement("script");
-    s.src = assetRef("katex/katex.min.js");
+    s.src = jsSrc;
     s.onload = function () {
       nodes.forEach(function (el) {
         try {

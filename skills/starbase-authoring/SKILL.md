@@ -1,11 +1,11 @@
 ---
-name: sitegen-authoring
-description: Write content for a sitegen knowledge base — markdown topics, wiki links, tables of contents, and embedded interactive templates. Use whenever creating or editing .md files that will be built with the `sitegen` tool.
+name: starbase-authoring
+description: Write content for a starbase knowledge base — markdown topics, wiki links, tables of contents, and embedded interactive templates. Use whenever creating or editing .md files that will be built with the `starbase` tool.
 ---
 
-# Authoring sitegen knowledge bases
+# Authoring starbase knowledge bases
 
-`sitegen` turns a tree of markdown files into a highly interactive but fully
+`starbase` turns a tree of markdown files into a highly interactive but fully
 static, wiki-like website. It is built **for agents**: it reports every problem
 (dead links, missing template arguments, broken templates) precisely so you can
 iterate a subject to completion.
@@ -15,16 +15,16 @@ iterate a subject to completion.
 Author in tight cycles. After *every* batch of edits:
 
 ```
-sitegen check <dir>      # fast: dead links + bad template calls, no rendering
+starbase check <dir>      # fast: dead links + bad template calls, no rendering
 ```
 
 Fix everything `check` reports, then occasionally:
 
 ```
-sitegen build <dir> -o _site -title "My KB"   # full incremental render
+starbase build <dir> -o _site -title "My KB"   # full incremental render
 ```
 
-A page is **done** when `sitegen check` reports zero errors and zero warnings
+A page is **done** when `starbase check` reports zero errors and zero warnings
 for it. Treat warnings as a to-do list, not noise.
 
 ## One file = one topic
@@ -86,7 +86,7 @@ template*:
 {{< sim name="doublependulum" caption="Sensitive dependence on initial conditions." >}}
 ```
 
-- Run `sitegen templates` to list every template and its arguments.
+- Run `starbase templates` to list every template and its arguments.
 - A **missing required argument is a hard ERROR** (e.g. `{{< chart >}}` with no
   `data`). Supply all required args.
 - Block form wraps inner markdown:

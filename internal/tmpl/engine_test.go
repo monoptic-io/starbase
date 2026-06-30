@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/monoptic-io/starbase/internal/model"
 )
 
 func newEngine(t *testing.T, name, src string) *Engine {

@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/monoptic-io/starbase/internal/model"
 	yaml "gopkg.in/yaml.v2"
 )
 

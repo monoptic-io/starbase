@@ -3,7 +3,7 @@ package graph
 import (
 	"testing"
 
-	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/monoptic-io/starbase/internal/model"
 )
 
 func topic(slug string, links ...string) *model.Topic {

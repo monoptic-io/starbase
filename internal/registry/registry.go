@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ryannedolan/sitegen/internal/model"
-	"github.com/ryannedolan/sitegen/internal/parse"
+	"github.com/monoptic-io/starbase/internal/model"
+	"github.com/monoptic-io/starbase/internal/parse"
 )
 
 type Registry struct {

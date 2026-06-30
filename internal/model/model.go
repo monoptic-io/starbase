@@ -1,4 +1,4 @@
-// Package model defines the core data types shared across sitegen.
+// Package model defines the core data types shared across starbase.
 //
 // A Topic is the unit of content: one markdown file. Topics are identified by
 // name (their title plus any aliases) and resolved to real paths at compile

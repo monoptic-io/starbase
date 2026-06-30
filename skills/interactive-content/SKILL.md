@@ -1,13 +1,13 @@
 ---
 name: interactive-content
-description: Build interactive visualizations, charts, plots, and simulations inside sitegen knowledge bases using template shortcodes — including custom canvas sketches with arbitrary JavaScript. Use when a topic would benefit from something the reader can watch, manipulate, or test themselves.
+description: Build interactive visualizations, charts, plots, and simulations inside starbase knowledge bases using template shortcodes — including custom canvas sketches with arbitrary JavaScript. Use when a topic would benefit from something the reader can watch, manipulate, or test themselves.
 ---
 
-# Interactive content in sitegen
+# Interactive content in starbase
 
-The whole point of sitegen is that static pages can still be *alive*. Reach for
+The whole point of starbase is that static pages can still be *alive*. Reach for
 an interactive element whenever a concept is dynamic, geometric, or has a
-"feel" that prose can't convey. Always run `sitegen templates` to confirm
+"feel" that prose can't convey. Always run `starbase templates` to confirm
 argument names; missing required arguments are build ERRORs.
 
 ## Charts — data you have
@@ -109,6 +109,6 @@ Left column markdown… (including [[links]] and **formatting**)
 ## Workflow
 
 1. Add the shortcode to your markdown.
-2. `sitegen check <dir>` — fixes argument errors instantly.
-3. `sitegen build <dir> -o _site` and open the page to watch it run.
+2. `starbase check <dir>` — fixes argument errors instantly.
+3. `starbase build <dir> -o _site` and open the page to watch it run.
 4. Iterate on the visual until it genuinely illuminates the idea.

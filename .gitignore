@@ -2,11 +2,17 @@
 /_site/
 /site/
 demo/_site/
-**/.sitegen-cache.json
+**/.starbase-cache.json
 
 # binaries
+/starbase
 /sitegen
 /dist/
+
+# vendored third-party assets — downloaded at build time with --vendor, never committed
+internal/assets/static/katex/
+**/static/katex/
+.starbase/
 
 # OS
 .DS_Store

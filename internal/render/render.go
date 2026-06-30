@@ -15,11 +15,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ryannedolan/sitegen/internal/graph"
-	"github.com/ryannedolan/sitegen/internal/model"
-	"github.com/ryannedolan/sitegen/internal/parse"
-	"github.com/ryannedolan/sitegen/internal/registry"
-	"github.com/ryannedolan/sitegen/internal/tmpl"
+	"github.com/monoptic-io/starbase/internal/graph"
+	"github.com/monoptic-io/starbase/internal/model"
+	"github.com/monoptic-io/starbase/internal/parse"
+	"github.com/monoptic-io/starbase/internal/registry"
+	"github.com/monoptic-io/starbase/internal/tmpl"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -34,6 +34,7 @@ type Site struct {
 	Title        string
 	BaseURL      string
 	AssetVersion string // short content hash, appended to asset URLs for cache-busting
+	KaTeXBase    string // base URL for KaTeX assets; empty means use the locally vendored copy
 }
 
 type Renderer struct {

@@ -7,7 +7,7 @@ package graph
 import (
 	"sort"
 
-	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/monoptic-io/starbase/internal/model"
 )
 
 type Graph struct {

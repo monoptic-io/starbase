@@ -1,4 +1,4 @@
-// Package tmpl is sitegen's embedded-content engine. Authors invoke templates
+// Package tmpl is starbase's embedded-content engine. Authors invoke templates
 // from markdown with shortcodes:
 //
 //	{{< chart type="line" height="320" data="0,1,4,9,16" >}}
@@ -25,7 +25,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ryannedolan/sitegen/internal/model"
+	"github.com/monoptic-io/starbase/internal/model"
 )
 
 type Param struct {
@@ -51,7 +51,7 @@ type Engine struct {
 
 func New() *Engine {
 	return &Engine{
-		root: template.New("sitegen").Funcs(FuncMap()),
+		root: template.New("starbase").Funcs(FuncMap()),
 		defs: map[string]*def{},
 	}
 }
@@ -77,7 +77,7 @@ func (e *Engine) Doc(name string) string {
 	return ""
 }
 
-// Catalog describes one template for the `sitegen templates` command.
+// Catalog describes one template for the `starbase templates` command.
 type Catalog struct {
 	Name   string
 	Doc    string

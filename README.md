@@ -1,4 +1,4 @@
-# sitegen
+# starbase
 
 A static knowledge-base generator **for agents**. It turns a tree of markdown
 files into a highly interactive but fully static, wiki-like website: articles
@@ -13,16 +13,16 @@ template — is reported precisely, so an agent can iterate a subject to complet
 ## Install / build
 
 ```sh
-go build -o sitegen ./cmd/sitegen
+go build -o starbase ./cmd/starbase
 ```
 
 ## Commands
 
 ```sh
-sitegen check <dir>                 # fast validation: dead links + bad template calls
-sitegen build <dir> -o _site \      # full incremental render
+starbase check <dir>                 # fast validation: dead links + bad template calls
+starbase build <dir> -o _site \      # full incremental render
         -title "My KB"
-sitegen templates [dir]             # list embedded templates and their arguments
+starbase templates [dir]             # list embedded templates and their arguments
 ```
 
 `check` parses, resolves every wiki link, and validates every template
@@ -41,9 +41,8 @@ Exit code is non-zero if there are errors (or, with `-strict`, warnings).
   Resolved by title/alias/filename. Unresolved links are warnings (your
   worklist) and render in red.
 - **Math**: inline `$...$` and display `$$...$$`, protected from markdown
-  mangling and rendered with KaTeX. KaTeX (CSS, JS, and woff2 fonts) is
-  **vendored and embedded** in the binary, so the generated site is fully
-  self-contained and works offline — no CDN.
+  mangling and rendered with KaTeX (linked from a CDN by default, or vendored
+  locally with `--vendor`; see below).
 - **Shortcodes** invoke templates with validated arguments:
 
   ```markdown
@@ -53,7 +52,7 @@ Exit code is non-zero if there are errors (or, with `-strict`, warnings).
   {{< note kind="tip" title="Remember" >}} inner **markdown** {{< /note >}}
   ```
 
-  A missing **required** argument is a hard error. Run `sitegen templates` to
+  A missing **required** argument is a hard error. Run `starbase templates` to
   see every template and its parameters. Custom interactive visualizations are
   authored with `{{< sketch >}} …JavaScript… {{< /sketch >}}`.
 
@@ -68,6 +67,34 @@ A content directory may contain `templates/` (custom or overriding shortcode
 templates), `layout/` (override the page layout), and `theme/` (override
 `theme.css` / `app.js`). Built-ins are embedded in the binary; project files
 shadow them by name.
+
+## Third-party assets & offline builds
+
+starbase ships no third-party front-end code in its repository. By default a
+build links external assets (currently just KaTeX) from a CDN — ideal for a
+public site like the demo.
+
+For an air-gapped or intranet deployment, build with `--vendor`: starbase
+downloads the assets on demand (verifying them by checksum), caches them under
+your user cache directory, and bundles a local copy into the site so it works
+with **no external requests**. Add `--offline` to require the cache and never
+touch the network.
+
+```sh
+starbase build site -o _site                 # links KaTeX from a CDN
+starbase build site -o _site --vendor        # downloads + bundles KaTeX locally
+starbase build site -o _site --vendor --offline   # cache only, no network
+```
+
+## Continuous integration
+
+`.github/workflows/` contains two workflows:
+
+- **ci.yml** (pull requests): builds, vets, tests, and runs
+  `starbase check demo -strict` — validating the demo's links and template
+  calls *without* rendering it.
+- **pages.yml** (push to `main`): renders the demo and publishes it to GitHub
+  Pages.
 
 ## How it works
 
@@ -87,7 +114,7 @@ The `internal/` packages are small and single-purpose
 ## Skills
 
 The `skills/` directory contains authoring guides for agents:
-`sitegen-authoring`, `interactive-content`, and `flesh-out-subject`.
+`starbase-authoring`, `interactive-content`, and `flesh-out-subject`.
 
 ## Demo
 
@@ -95,5 +122,5 @@ The `skills/` directory contains authoring guides for agents:
 chaos, complex systems) authored to exercise the tool. Build it with:
 
 ```sh
-sitegen build demo -o demo/_site -title "Dynamical Systems"
+starbase build demo -o demo/_site -title "Dynamical Systems"
 ```

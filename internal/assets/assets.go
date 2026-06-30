@@ -1,4 +1,4 @@
-// Package assets holds sitegen's built-in templates, page layout, and theme,
+// Package assets holds starbase's built-in templates, page layout, and theme,
 // embedded into the binary so the tool works with zero external files.
 //
 // Resolution order lets a project override anything: a project's own

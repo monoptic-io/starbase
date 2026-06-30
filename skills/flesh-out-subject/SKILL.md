@@ -1,13 +1,13 @@
 ---
 name: flesh-out-subject
-description: Build out an entire subject area as a connected sitegen knowledge base — planning the topic map, writing interlinked pages, and iterating with `sitegen check` until there are no dead links. Use when asked to create or expand a knowledge base on some domain.
+description: Build out an entire subject area as a connected starbase knowledge base — planning the topic map, writing interlinked pages, and iterating with `starbase check` until there are no dead links. Use when asked to create or expand a knowledge base on some domain.
 ---
 
 # Fleshing out a subject area
 
 Goal: a *connected* web of topics where a reader can start anywhere and keep
 exploring, every link resolves, and key ideas are illustrated interactively.
-Use this together with the **sitegen-authoring** and **interactive-content**
+Use this together with the **starbase-authoring** and **interactive-content**
 skills.
 
 ## 1. Map before you write
@@ -31,7 +31,7 @@ go — `[[Lyapunov Exponent]]` even before that page exists. Dead links are not
 errors to avoid; they are your **worklist**. After a pass:
 
 ```
-sitegen check <dir>
+starbase check <dir>
 ```
 
 Every `dead link: no topic named "X"` is a page still to write (or a name to
@@ -55,8 +55,8 @@ tag pages read well.
 Iterate the loop until clean:
 
 ```
-sitegen check <dir>          # 0 errors, 0 warnings is the bar
-sitegen build <dir> -o _site -title "<Subject>"
+starbase check <dir>          # 0 errors, 0 warnings is the bar
+starbase build <dir> -o _site -title "<Subject>"
 ```
 
 Open the built site and click around as a reader would. Ask:
@@ -72,7 +72,7 @@ Open the built site and click around as a reader would. Ask:
 
 Before declaring a subject done, confirm:
 
-- [ ] `sitegen check` is completely clean.
+- [ ] `starbase check` is completely clean.
 - [ ] Every section folder has an `index.md`.
 - [ ] No orphan pages (every topic has at least one inbound link).
 - [ ] Pillar topics are richly linked and have strong interactive demos.
