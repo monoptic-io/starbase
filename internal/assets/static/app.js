@@ -174,11 +174,11 @@
     if (typeof data !== "string") return [[]];
     data = data.trim();
     if (data[0] === "[") { try { var j = JSON.parse(data); return Array.isArray(j[0]) ? j : [j]; } catch (e) {} }
-    // "x:y" pairs?
+    // "x:y" pairs, separated by commas, spaces, semicolons, or newlines.
     if (/[:]/.test(data)) {
-      var pts = data.split(/[;\n]+/).map(function (p) {
+      var pts = data.split(/[;,\s]+/).filter(Boolean).map(function (p) {
         var kv = p.split(":"); return [Number(kv[0]), Number(kv[1])];
-      }).filter(function (p) { return !isNaN(p[1]); });
+      }).filter(function (p) { return !isNaN(p[0]) && !isNaN(p[1]); });
       return [pts];
     }
     return [data.split(/[\s,]+/).map(Number).filter(function (n) { return !isNaN(n); })];
