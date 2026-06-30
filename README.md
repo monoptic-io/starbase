@@ -10,8 +10,9 @@ simulations, and arbitrary interactive visualizations through a template system.
 Every problem it can detect — a dead link, a missing template argument, a broken
 template — is reported precisely, so an agent can iterate a subject to completion.
 
-**▶ See the live demo: https://monoptic-io.github.io/starbase/** — a knowledge
-base on dynamical systems, built and deployed from this repo by GitHub Actions.
+**▶ See the live demo: https://monoptic-io.github.io/starbase/** — an interactive
+field guide to systems, signals & computation, built and deployed from this repo
+by GitHub Actions.
 
 ## Install / build
 
@@ -113,7 +114,7 @@ build      per-page fingerprints drive incremental rendering
 ```
 
 The `internal/` packages are small and single-purpose
-(`model`, `parse`, `registry`, `graph`, `tmpl`, `render`, `cache`, `build`).
+(`model`, `parse`, `registry`, `graph`, `tmpl`, `render`, `cache`, `vendor`, `build`).
 
 ## Skills
 
@@ -122,8 +123,10 @@ The `skills/` directory contains authoring guides for agents:
 
 ## Demo
 
-`demo/` is a knowledge base on dynamical systems (foundations, oscillations,
-waves, Fourier analysis, chaos, complex systems) authored to exercise the tool.
+`demo/` is a 12-section interactive field guide — dynamical-systems foundations,
+oscillations, waves, Fourier analysis, chaos, complex systems, linear algebra,
+graph theory & networks, probability, information theory, optimization & learning,
+and cryptography — authored by sub-agents to exercise the tool.
 It is published live at **https://monoptic-io.github.io/starbase/**. Build it
 locally with:
 

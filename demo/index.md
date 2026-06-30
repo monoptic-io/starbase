@@ -51,6 +51,14 @@ the [[Central Limit Theorem]], [[Markov Chain]]s, and [[Brownian Motion]].
 
 **[[Information Theory]]** — measuring surprise and its limits: [[Entropy]],
 [[Huffman Coding]], [[Error-Correcting Code]]s, and [[Channel Capacity]].
+
+**[[Optimization & Learning]]** — searching a landscape for the best point:
+[[Gradient Descent]], [[Simulated Annealing]], the [[Perceptron]], and
+[[Neural Network]]s.
+
+**[[Cryptography]]** — keeping secrets and proving identity: the [[Caesar Cipher]],
+the unbreakable [[One-Time Pad]], [[Diffie–Hellman]] key exchange, [[RSA]], and
+[[Digital Signature]]s.
 {{< /columns >}}
 
 {{< note kind="tip" title="How to explore" >}}

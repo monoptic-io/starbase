@@ -279,18 +279,24 @@
   function runLoop(figure, canvas, sim) {
     var view = hidpi(canvas);
     var running = true, last = 0, t = 0, raf = null;
-    var mouse = { x: 0, y: 0, down: false };
+    var mouse = { x: 0, y: 0, down: false, clicked: false };
+    var heldDown = false, clickLatch = false;
     canvas.addEventListener("pointermove", function (e) {
       var r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
     });
-    canvas.addEventListener("pointerdown", function () { mouse.down = true; });
-    window.addEventListener("pointerup", function () { mouse.down = false; });
+    canvas.addEventListener("pointerdown", function (e) {
+      var r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
+      heldDown = true; clickLatch = true;
+    });
+    window.addEventListener("pointerup", function () { heldDown = false; });
     if (sim.init) sim.init({ W: view.W, H: view.H, mouse: mouse });
     function frame(ts) {
       var dt = last ? Math.min((ts - last) / 1000, 0.05) : 0.016; last = ts;
+      mouse.down = heldDown || clickLatch; mouse.clicked = clickLatch;
       if (running) { t += dt; if (sim.step) sim.step(dt, { W: view.W, H: view.H, mouse: mouse, t: t }); }
       view.clear();
       sim.draw(view.ctx, view.W, view.H, { t: t, mouse: mouse });
+      clickLatch = false;
       raf = requestAnimationFrame(frame);
     }
     raf = requestAnimationFrame(frame);
@@ -526,22 +532,49 @@
       };
     },
     vectorfield: function (c) {
-      var fx = compile(c.fx || "y"), fy = compile(c.fy || "-x"), step = num(c.spacing, 34);
+      var fx = compile(c.fx || "y"), fy = compile(c.fy || "-x"), step = num(c.spacing, 34), sc = num(c.scale, 0.5);
+      var SX = function (W) { return W / 8; }, SY = function (H) { return H / 8; };
+      var parts = [];
+      function spawnField(x, y) { parts.push({ x: x, y: y, trail: [] }); if (parts.length > 14) parts.shift(); }
       return {
+        init: function () { parts = []; spawnField(2.6, 0.4); spawnField(-1.8, -1.4); },
+        step: function (dt, env) {
+          var W = env.W, H = env.H;
+          if (env.mouse && env.mouse.clicked) {
+            spawnField((env.mouse.x - W / 2) / SX(W), (H / 2 - env.mouse.y) / SY(H));
+          }
+          var h = Math.min(dt, 0.025) * 1.5;
+          for (var i = parts.length - 1; i >= 0; i--) {
+            var p = parts[i];
+            var k1x = fx(p.x, p.y), k1y = fy(p.x, p.y); // RK2 midpoint
+            var mx = p.x + k1x * h / 2, my = p.y + k1y * h / 2;
+            p.x += fx(mx, my) * h; p.y += fy(mx, my) * h;
+            p.trail.push([W / 2 + p.x * SX(W), H / 2 - p.y * SY(H)]);
+            if (p.trail.length > 200) p.trail.shift();
+            if (Math.abs(p.x) > 14 || Math.abs(p.y) > 14) parts.splice(i, 1);
+          }
+        },
         draw: function (ctx, W, H) {
-          var sc = num(c.scale, 0.5);
           for (var py = step / 2; py < H; py += step) for (var px = step / 2; px < W; px += step) {
-            var x = (px - W / 2) / (W / 8), y = (H / 2 - py) / (H / 8);
+            var x = (px - W / 2) / SX(W), y = (H / 2 - py) / SY(H);
             var vx = fx(x, y), vy = fy(x, y), m = Math.hypot(vx, vy) || 1;
             var ux = vx / m, uy = -vy / m, L = Math.min(step * 0.45, m * sc * 8 + 4);
-            ctx.strokeStyle = css("--accent"); ctx.globalAlpha = Math.min(1, 0.25 + m * 0.1); ctx.lineWidth = 1.4;
+            ctx.strokeStyle = css("--text-faint"); ctx.globalAlpha = Math.min(0.55, 0.16 + m * 0.07); ctx.lineWidth = 1.2;
             ctx.beginPath(); ctx.moveTo(px, py); var ex = px + ux * L, ey = py + uy * L; ctx.lineTo(ex, ey);
             ctx.moveTo(ex, ey); ctx.lineTo(ex - ux * 4 - uy * 3, ey - uy * 4 + ux * 3);
             ctx.moveTo(ex, ey); ctx.lineTo(ex - ux * 4 + uy * 3, ey - uy * 4 - ux * 3);
-            ctx.stroke(); ctx.globalAlpha = 1;
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          for (var i = 0; i < parts.length; i++) {
+            var tr = parts[i].trail; if (tr.length < 2) continue;
+            ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.beginPath();
+            for (var j = 0; j < tr.length; j++) j ? ctx.lineTo(tr[j][0], tr[j][1]) : ctx.moveTo(tr[j][0], tr[j][1]);
+            ctx.stroke();
+            var head = tr[tr.length - 1];
+            ctx.fillStyle = css("--accent"); ctx.beginPath(); ctx.arc(head[0], head[1], 4, 0, 7); ctx.fill();
           }
         },
-        step: function () {},
       };
     },
     wave: function (c) {
