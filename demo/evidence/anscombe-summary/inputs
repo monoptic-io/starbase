@@ -1,0 +1,6 @@
+# All four Anscombe datasets, staged by basename into this check's CWD.
+# The fourth is renamed source -> name to exercise the rename path.
+data/anscombe-1.csv
+data/anscombe-2.csv
+data/anscombe-3.csv
+data/anscombe-4.csv -> set4.csv

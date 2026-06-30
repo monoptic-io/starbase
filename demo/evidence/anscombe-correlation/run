@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+# inputs: data/anscombe-{1,2,3,4}.csv  (no rename here)
+# The Pearson correlation of x and y is the same for all four datasets to two
+# decimals (each is 0.816..., the fourth 0.8165). Assert they agree at that
+# precision, then print the single shared value.
+import csv
+
+def load(path):
+    xs, ys = [], []
+    with open(path) as f:
+        r = csv.reader(f)
+        next(r)
+        for row in r:
+            xs.append(float(row[0])); ys.append(float(row[1]))
+    return xs, ys
+
+def corr(xs, ys):
+    n = len(xs)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    vx = sum((x - mx) ** 2 for x in xs)
+    vy = sum((y - my) ** 2 for y in ys)
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    return cov / ((vx ** 0.5) * (vy ** 0.5))
+
+vals = [corr(*load("anscombe-%d.csv" % i)) for i in (1, 2, 3, 4)]
+rounded = {"%.2f" % v for v in vals}
+assert len(rounded) == 1, "datasets disagree on correlation: %s" % rounded
+print(rounded.pop())

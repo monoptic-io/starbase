@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# inputs: data/anscombe-{1,2,3,4}.csv  (4th staged as set4.csv via -> rename)
+# Per-dataset summary statistics for Anscombe's quartet. The punchline: all four
+# datasets share (to two decimals) the same mean x, mean y, sample variance of x
+# and y, Pearson correlation, and least-squares fit y = intercept + slope*x.
+import csv
+
+files = ["anscombe-1.csv", "anscombe-2.csv", "anscombe-3.csv", "set4.csv"]
+
+def load(path):
+    xs, ys = [], []
+    with open(path) as f:
+        r = csv.reader(f)
+        next(r)  # header x,y
+        for row in r:
+            xs.append(float(row[0])); ys.append(float(row[1]))
+    return xs, ys
+
+def stats(xs, ys):
+    n = len(xs)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    vx = sum((x - mx) ** 2 for x in xs) / (n - 1)
+    vy = sum((y - my) ** 2 for y in ys) / (n - 1)
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (n - 1)
+    r = cov / ((vx ** 0.5) * (vy ** 0.5))
+    slope = cov / vx
+    intercept = my - slope * mx
+    return mx, my, vx, vy, r, slope, intercept
+
+print("set  mean_x  mean_y  var_x  var_y   corr  slope  intercept")
+for i, path in enumerate(files, start=1):
+    mx, my, vx, vy, r, slope, intercept = stats(*load(path))
+    print("%3d  %6.2f  %6.2f  %5.2f  %5.2f  %5.3f  %5.2f  %9.2f"
+          % (i, mx, my, vx, vy, r, slope, intercept))

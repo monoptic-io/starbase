@@ -1,0 +1,6 @@
+# All four datasets again; this check verifies the shared correlation is the
+# same across every dataset and prints that single rounded value.
+data/anscombe-1.csv
+data/anscombe-2.csv
+data/anscombe-3.csv
+data/anscombe-4.csv

@@ -29,6 +29,7 @@ The structure shows up everywhere once you look. The aimless stagger of a [[Rand
 - [[Bayes' Theorem]] — turning evidence into updated belief.
 - [[Galton Board]] — the central limit theorem made of falling beads.
 - [[Benford's Law]] — why real-world numbers begin with the digit 1 about 30% of the time.
+- [[Anscombe's Quartet]] — four datasets with identical statistics that look nothing alike.
 
 ## How it connects
 
