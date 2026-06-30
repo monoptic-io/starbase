@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+# Pure computation, no inputs: the period-doubling bifurcations b_n of the
+# logistic map pile up geometrically, the gaps shrinking by ~delta each step.
+# Locating the last few b_n (via the multiplier=-1 condition) and summing the
+# remaining geometric tail of gaps gives the accumulation point r_inf, where the
+# period first becomes infinite and the map turns chaotic: r_inf ~ 3.56995.
+import math
+
+def f(r, x):  return r * x * (1.0 - x)
+def fp(r, x): return r * (1.0 - 2.0 * x)
+
+def cycle_mult(r, p, x):
+    for _ in range(200):
+        y, deriv = x, 1.0
+        for _ in range(p):
+            deriv *= fp(r, y); y = f(r, y)
+        denom = deriv - 1.0
+        if denom == 0.0: break
+        dx = (y - x) / denom
+        x -= dx
+        if abs(dx) < 1e-15: break
+    y, M = x, 1.0
+    for _ in range(p):
+        M *= fp(r, y); y = f(r, y)
+    return x, M
+
+def bifurcation(p, r_seed):
+    x = 0.5
+    for _ in range(200000): x = f(r_seed, x)
+    r0, (x0, M0) = r_seed, cycle_mult(r_seed, p, x)
+    r1, (x1, M1) = r_seed + 1e-4, cycle_mult(r_seed + 1e-4, p, x)
+    for _ in range(100):
+        F0, F1 = M0 + 1.0, M1 + 1.0
+        if F1 == F0: break
+        r2 = r1 - F1 * (r1 - r0) / (F1 - F0)
+        x2, M2 = cycle_mult(r2, p, x1)
+        r0, M0, x0 = r1, M1, x1
+        r1, M1, x1 = r2, M2, x2
+        if abs(r1 - r0) < 1e-15: break
+    return r1
+
+b5 = bifurcation(16, 3.5675)
+b6 = bifurcation(32, 3.5694)
+delta = 4.669201609102990
+last_gap = b6 - b5
+# remaining gaps b7-b6, b8-b7, ... ~ last_gap/delta * (1 + 1/delta + ...)
+tail = (last_gap / delta) / (1.0 - 1.0 / delta)
+r_inf = b6 + tail
+print(f"b5 (period 16 -> 32) = {b5:.10f}")
+print(f"b6 (period 32 -> 64) = {b6:.10f}")
+print(f"last gap b6-b5       = {last_gap:.10f}")
+print(f"geometric tail / delta = {tail:.10f}")
+print(f"accumulation r_inf   = {r_inf:.5f}  (true 3.5699456...)")

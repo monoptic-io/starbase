@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+# Pure computation, no inputs: march the logistic map x -> r*x*(1-x) up the
+# period-doubling cascade. A period-2^(n-1) cycle loses stability exactly where
+# its multiplier (product of f'(x_i) around the cycle) reaches -1; that r is the
+# bifurcation b_n. We pin each b_n to machine precision with a Newton-polished
+# cycle and a secant on the multiplier, then form Feigenbaum's ratios
+# delta_n = (b_n - b_{n-1}) / (b_{n+1} - b_n), which converge to 4.6692016...
+import math
+
+def f(r, x):  return r * x * (1.0 - x)
+def fp(r, x): return r * (1.0 - 2.0 * x)
+
+def cycle_mult(r, p, x):
+    # Newton-polish x onto a period-p point of f(.,r); return (point, multiplier)
+    for _ in range(200):
+        y, deriv = x, 1.0
+        for _ in range(p):
+            deriv *= fp(r, y); y = f(r, y)
+        denom = deriv - 1.0
+        if denom == 0.0: break
+        dx = (y - x) / denom
+        x -= dx
+        if abs(dx) < 1e-15: break
+    y, M = x, 1.0
+    for _ in range(p):
+        M *= fp(r, y); y = f(r, y)
+    return x, M
+
+def bifurcation(p, r_seed):
+    x = 0.5
+    for _ in range(200000): x = f(r_seed, x)      # land on the attracting cycle
+    r0, (x0, M0) = r_seed, cycle_mult(r_seed, p, x)
+    r1, (x1, M1) = r_seed + 1e-4, cycle_mult(r_seed + 1e-4, p, x)
+    for _ in range(100):                          # secant drives multiplier -> -1
+        F0, F1 = M0 + 1.0, M1 + 1.0
+        if F1 == F0: break
+        r2 = r1 - F1 * (r1 - r0) / (F1 - F0)
+        x2, M2 = cycle_mult(r2, p, x1)
+        r0, M0, x0 = r1, M1, x1
+        r1, M1, x1 = r2, M2, x2
+        if abs(r1 - r0) < 1e-15: break
+    return r1
+
+seeds   = [2.9, 3.4, 3.52, 3.560, 3.5675, 3.5694]   # one per doubling
+periods = [1, 2, 4, 8, 16, 32]
+b = [bifurcation(p, s) for p, s in zip(periods, seeds)]
+
+print("n  period  r_n (bifurcation)      gap             delta_n")
+for i in range(len(b)):
+    period = periods[i]
+    gap   = f"{b[i]-b[i-1]:.10f}" if i >= 1 else ""
+    delta = f"{(b[i-1]-b[i-2])/(b[i]-b[i-1]):.5f}" if i >= 2 else ""
+    print(f"{i+1}  {period:6d}  {b[i]:.10f}   {gap:>13}   {delta:>9}")
+best = (b[-2] - b[-3]) / (b[-1] - b[-2])
+print(f"best ratio delta_5 = {best:.5f}  ->  delta ~ 4.669  (Feigenbaum 4.6692016...)")

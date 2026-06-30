@@ -63,10 +63,11 @@ write a program that recomputes it. `starbase verify` re-runs the program at bui
 time and **fails if the article and the computation disagree** — so the build, not
 the author, is the source of truth.
 
-A check is a directory under `evidence/` containing an executable `run` and an
-`inputs` manifest. The contract is just **stdout and exit code**, like a golden
-test — so `run` can be *any* program. Bind it to a claim with
-`check="<directory name>"`:
+A check is a directory under `evidence/` containing an executable `run` and —
+**only when it reads external data** — an `inputs` manifest. A self-contained
+computation (a simulation, a closed-form derivation) needs *no* `inputs` file: just
+`run`. The contract is just **stdout and exit code**, like a golden test — so `run`
+can be *any* program. Bind it to a claim with `check="<directory name>"`:
 
 ```
 evidence/midwest-regions/inputs        # one source per line; # comments allowed
@@ -170,6 +171,13 @@ So the loop mirrors topic-writing:
 Drive both to zero. A finished research KB has no dead links *and* no unsupported
 claims — every assertion traces to something a reader can inspect and, in
 principle, re-run.
+
+## Worked examples
+
+- **Data-backed** (file provider + `inputs`): `examples/sales-research/` and
+  `demo/probability/benfords-law.md` with `demo/evidence/benford-*/`.
+- **Self-contained** (pure computation, *no* `inputs`):
+  `demo/chaos/feigenbaum-constant.md` with `demo/evidence/feigenbaum-*/`.
 
 ## Tips
 

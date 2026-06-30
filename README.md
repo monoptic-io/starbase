@@ -93,7 +93,9 @@ coordination signal as a dead link: one agent asserts, the warning tells the swa
 to go find the evidence (or correct the value).
 
 To make a number **un-fakeable**, bind a claim to a `check` and add a directory
-under `evidence/<check>/` with an executable `run` and an `inputs` manifest:
+under `evidence/<check>/` with an executable `run` and — only when it reads
+external data — an `inputs` manifest (a self-contained computation needs just
+`run`):
 
 ```
 evidence/midwest-regions/inputs        # one source per line

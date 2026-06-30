@@ -23,7 +23,7 @@ The successive period-doubling thresholds $r_n$ pile up geometrically, and the r
 
 $$\delta = \lim_{n\to\infty}\frac{r_{n}-r_{n-1}}{r_{n+1}-r_{n}} = 4.6692016\ldots$$
 
-Mitchell Feigenbaum found that the **same** number governs the period-doubling route in countless unrelated systems — dripping faucets, heart cells, electronic circuits. The logistic map is the simplest place to meet this deep universality.
+Mitchell Feigenbaum found that the **same** number governs the period-doubling route in countless unrelated systems — dripping faucets, heart cells, electronic circuits. The logistic map is the simplest place to meet this deep universality; see [[Feigenbaum Constant]] for where these thresholds fall and how fast they pile up.
 {{< /note >}}
 
 ## The bifurcation diagram

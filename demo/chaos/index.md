@@ -38,6 +38,7 @@ Systems usually do not become chaotic all at once. As you turn a control knob, a
 - [[Lorenz System]] — three equations, one iconic butterfly-shaped attractor.
 - [[Double Pendulum]] — the simplest mechanical system that goes chaotic.
 - [[Logistic Map]] — a one-line map and its period-doubling road to chaos.
+- [[Feigenbaum Constant]] — the universal rate δ ≈ 4.6692 at which that cascade runs.
 - [[Strange Attractor]] — the fractal sets chaotic motion settles onto.
 - [[Fractal]] — self-similarity and non-integer dimension.
 - [[Poincaré Section]] — slicing a flow to expose its hidden map.
