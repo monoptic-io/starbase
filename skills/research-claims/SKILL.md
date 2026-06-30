@@ -52,48 +52,55 @@ write a program that recomputes it. `starbase verify` re-runs the program at bui
 time and **fails if the article and the computation disagree** — so the build, not
 the author, is the source of truth.
 
-Each check is a Go `main` package — a *unit* — under `evidence/`. It can do
-anything (pure Go, or shell out to DuckDB, a SQL driver, an API) and prints its
-result(s) as JSON: a single result named after its directory,
+Write evidence as **plain Go functions**, exactly like `go test` — no `main`, no
+JSON. The `evidence/` directory is one Go module; each sub-package is a check
+*unit*. A check is an exported function with no parameters that returns a value
+(optionally with an `error`):
 
-```json
-{ "value": "4" }
+```go
+package sales
+import (...)
+
+//starbase:deps data/sales.csv          // data deps, relative to the KB root
+
+func MidwestRegions() (int, error) {     // becomes check "midwest-regions"
+    rows, err := readCSV("data/sales.csv")
+    ...
+    return n, nil
+}
+
+func RevenueByDivision() ([][]string, error) {  // a [][]string becomes a table
+    ...
+    return table, nil
+}
 ```
 
-or a map of named results,
-
-```json
-{ "midwest-regions": { "value": "4" },
-  "revenue-by-division": { "table": [["division","total"],["Midwest","11400000"]] } }
-```
-
-Bind the claim with `check="midwest-regions"`. `verify` compares the claim's
-embedded `value`/result to the computed one (numbers are compared numerically, so
-`11,400,000` matches `11400000`).
+starbase discovers these functions, generates a runner that calls them (the way
+`go test` generates a test main), runs it with the **KB root as the working
+directory** (so open `data/sales.csv`, not `../../data/...`), and binds each
+result to a claim by its kebab-cased name: `check="midwest-regions"`. Return a
+scalar (`int`, `float64`, `string`, …) for a value or `[][]string` for a table.
+`verify` compares numerically, so `11,400,000` matches `11400000`. The function
+can do anything — pure Go, or shell out to DuckDB, a SQL driver, an API.
 
 ### Incremental, like `go test`
 
-starbase caches each unit's result keyed by a hash of its Go sources **plus the
-data files it declares**:
-
-```go
-//starbase:deps ../../data/sales.csv
-```
-
-A unit is re-run only when its code or a declared dep changes. So:
+starbase caches each package's results keyed by a hash of its Go sources **plus
+the data files it declares** (`//starbase:deps`, relative to the KB root). A
+package re-runs only when its code or a declared dep changes:
 
 - editing an unrelated page never re-runs anything;
-- editing one check's code re-runs only that check;
-- changing a data file re-runs every unit that declares it.
+- editing one check's package re-runs only that package;
+- changing a data file re-runs every package that declares it.
 
 **Put each expensive check in its own package directory** so a minutes-long
 simulation isn't re-run when you touch something else. Always declare data deps,
-or the local cache can go stale. The cache is a local convenience: CI starts
-cold and re-runs everything, so CI is always authoritative.
+or the local cache can go stale. The cache is a local convenience: CI starts cold
+and re-runs everything, so CI is authoritative.
 
 ```sh
-starbase verify <dir>          # re-runs only changed units; diffs every checked claim
-starbase verify <dir> -force   # ignore the cache and re-run all units
+starbase verify <dir>          # re-runs only changed packages; diffs every checked claim
+starbase verify <dir> -force   # ignore the cache and re-run everything
 ```
 
 Wire `verify` into CI. A claim with a `check` that re-executes and matches is

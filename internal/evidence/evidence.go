@@ -1,24 +1,23 @@
-// Package evidence runs a knowledge base's evidence programs and returns their
+// Package evidence runs a knowledge base's evidence functions and returns their
 // results, so claims can be verified by re-execution rather than trust.
 //
-// It is runner-agnostic and incremental, in the spirit of `go test`:
+// It works like `go test`: the author writes plain exported functions in an
+// `evidence/` Go module — no main, no JSON, no boilerplate —
 //
-//   - A content directory may hold an `evidence/` tree. Each directory under it
-//     that contains Go files is a *unit* — a `main` package that computes some
-//     facts and prints them as JSON. A unit may be the `evidence/` dir itself,
-//     or a sub-package per expensive check (e.g. `evidence/orbit-sim/`).
-//   - A unit prints either a single result, `{"value": "..."}` /
-//     `{"table": [...]}`, named after its directory, or a map of named results,
-//     `{"midwest-regions": {"value": "4"}, ...}`.
-//   - starbase caches each unit's result keyed by a content hash of its Go
-//     sources plus any data files it declares with a `//starbase:deps <glob>`
-//     comment. A unit is re-run only when that hash changes — so editing an
-//     unrelated page never re-runs a minutes-long simulation. The cache lives in
-//     the user cache dir; CI starts cold, so CI is always authoritative.
+//	package sales
+//	//starbase:deps ../../data/sales.csv
+//	func MidwestRegions() (int, error) { ... return n, nil }
+//	func RevenueByDivision() ([][]string, error) { ... return table, nil }
 //
-// starbase ships no language runners: the unit's Go does the work (pure Go, or
-// shelling out to DuckDB, a driver, an API). starbase builds, runs, caches, and
-// hands the results to `verify` for comparison.
+// starbase discovers those functions (an exported func with no parameters
+// returning a value, optionally with an error), generates a tiny runner that
+// calls them — exactly as `go test` generates a test main — runs it, and binds
+// each result to a claim via `check="midwest-regions"` (the kebab-cased name).
+//
+// It is incremental: each package is a cache unit, keyed by a hash of its Go
+// sources plus the data files it declares with `//starbase:deps`. A package is
+// re-run only when its own code or data changes. The cache lives in the user
+// cache dir, so CI starts cold and is authoritative.
 package evidence
 
 import (
@@ -28,6 +27,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,110 +48,304 @@ type Check struct {
 
 // Unit is one evidence package and how it was resolved this run.
 type Unit struct {
-	Name   string // default result name (its directory)
-	Dir    string
+	Name   string
 	Cached bool
 	Err    string
 }
 
-// Result is the merged output of every unit plus per-unit status.
+// Result is the merged output of every package plus per-package status.
 type Result struct {
 	Checks map[string]Check
 	Units  []Unit
 }
 
-const perUnitTimeout = 20 * time.Minute
+const perRunTimeout = 20 * time.Minute
 
-// Run resolves every evidence unit, reusing cached results whose inputs are
+type fn struct {
+	GoName  string // exported Go function name
+	Name    string // kebab-cased check name
+	Results int    // 1 or 2 (value, or value+error)
+}
+
+type pkg struct {
+	ImportPath string
+	Dir        string
+	RelName    string // path relative to evidence/, for display
+	GoFiles    []string
+	funcs      []fn
+	key        string
+}
+
+// Run resolves every evidence package, reusing cached results whose inputs are
 // unchanged and re-running the rest. The bool reports whether evidence exists.
 func Run(contentDir string, force bool) (Result, bool, error) {
 	evDir := filepath.Join(contentDir, "evidence")
 	if fi, err := os.Stat(evDir); err != nil || !fi.IsDir() {
 		return Result{}, false, nil
 	}
-	units := discoverUnits(evDir)
+	pkgs, modPath, err := listPackages(evDir)
+	if err != nil {
+		return Result{}, true, err
+	}
+
 	cache := loadCache(contentDir)
 	res := Result{Checks: map[string]Check{}}
+	var toRun []*pkg
 
-	for _, u := range units {
-		key, err := unitKey(u.Dir)
-		if err != nil {
-			u.Err = err.Error()
-			res.Units = append(res.Units, u)
-			continue
+	for i := range pkgs {
+		p := &pkgs[i]
+		if len(p.funcs) == 0 {
+			continue // not an evidence package
 		}
+		p.key = unitKey(p, contentDir)
 		if !force {
-			if c, ok := cache[u.Name]; ok && c.Key == key {
-				u.Cached = true
-				merge(res.Checks, c.Checks, u.Name)
-				res.Units = append(res.Units, u)
+			if c, ok := cache[p.ImportPath]; ok && c.Key == p.key {
+				res.Units = append(res.Units, Unit{Name: p.RelName, Cached: true})
+				for n, ck := range c.Checks {
+					res.Checks[n] = ck
+				}
 				continue
 			}
 		}
-		checks, runErr := runUnit(u.Dir)
-		if runErr != "" {
-			u.Err = runErr
-			res.Units = append(res.Units, u)
-			continue
+		toRun = append(toRun, p)
+	}
+
+	if len(toRun) > 0 {
+		produced, runErr := runGenerated(evDir, contentDir, modPath, toRun)
+		for _, p := range toRun {
+			if runErr != "" {
+				res.Units = append(res.Units, Unit{Name: p.RelName, Err: runErr})
+				continue
+			}
+			pkgChecks := map[string]Check{}
+			for _, f := range p.funcs {
+				if ck, ok := produced[f.Name]; ok {
+					pkgChecks[f.Name] = ck
+					res.Checks[f.Name] = ck
+				}
+			}
+			cache[p.ImportPath] = cachedUnit{Key: p.key, Checks: pkgChecks}
+			res.Units = append(res.Units, Unit{Name: p.RelName})
 		}
-		cache[u.Name] = cachedUnit{Key: key, Checks: checks}
-		merge(res.Checks, checks, u.Name)
-		res.Units = append(res.Units, u)
 	}
 	saveCache(contentDir, cache)
 	return res, true, nil
 }
 
-func discoverUnits(evDir string) []Unit {
-	var units []Unit
-	if hasGo(evDir) {
-		units = append(units, Unit{Name: "evidence", Dir: evDir})
+// --- package + function discovery ---
+
+func listPackages(evDir string) ([]pkg, string, error) {
+	cmd := exec.Command("go", "list", "-json", "./...")
+	cmd.Dir = evDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, "", fmt.Errorf("evidence/ must be a Go module: %s", msg)
 	}
-	entries, _ := os.ReadDir(evDir)
-	for _, e := range entries {
-		if e.IsDir() {
-			d := filepath.Join(evDir, e.Name())
-			if hasGo(d) {
-				units = append(units, Unit{Name: e.Name(), Dir: d})
+	type listed struct {
+		ImportPath string
+		Dir        string
+		GoFiles    []string
+		Module     struct{ Path string }
+	}
+	var pkgs []pkg
+	var modPath string
+	dec := json.NewDecoder(&stdout)
+	for dec.More() {
+		var l listed
+		if err := dec.Decode(&l); err != nil {
+			return nil, "", err
+		}
+		if l.Module.Path != "" {
+			modPath = l.Module.Path
+		}
+		rel, _ := filepath.Rel(evDir, l.Dir)
+		p := pkg{ImportPath: l.ImportPath, Dir: l.Dir, RelName: filepath.ToSlash(rel)}
+		for _, g := range l.GoFiles {
+			p.GoFiles = append(p.GoFiles, filepath.Join(l.Dir, g))
+		}
+		p.funcs = discoverFuncs(p.GoFiles)
+		pkgs = append(pkgs, p)
+	}
+	return pkgs, modPath, nil
+}
+
+func discoverFuncs(goFiles []string) []fn {
+	var out []fn
+	fset := token.NewFileSet()
+	for _, gf := range goFiles {
+		f, err := parser.ParseFile(fset, gf, nil, 0)
+		if err != nil {
+			continue
+		}
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || !fd.Name.IsExported() {
+				continue
+			}
+			if fd.Type.Params != nil && len(fd.Type.Params.List) > 0 {
+				continue
+			}
+			n := results(fd.Type)
+			if n == 1 || n == 2 {
+				out = append(out, fn{GoName: fd.Name.Name, Name: kebab(fd.Name.Name), Results: n})
 			}
 		}
 	}
-	return units
+	sort.Slice(out, func(i, j int) bool { return out[i].GoName < out[j].GoName })
+	return out
 }
 
-func hasGo(dir string) bool {
-	m, _ := filepath.Glob(filepath.Join(dir, "*.go"))
-	return len(m) > 0
+// results returns the count if the signature is a check: (T) or (T, error).
+func results(t *ast.FuncType) int {
+	if t.Results == nil {
+		return 0
+	}
+	var names []string
+	for _, r := range t.Results.List {
+		// a field may declare multiple results sharing a type
+		count := 1
+		if len(r.Names) > 1 {
+			count = len(r.Names)
+		}
+		for i := 0; i < count; i++ {
+			if id, ok := r.Type.(*ast.Ident); ok {
+				names = append(names, id.Name)
+			} else {
+				names = append(names, "?")
+			}
+		}
+	}
+	switch len(names) {
+	case 1:
+		return 1
+	case 2:
+		if names[1] == "error" {
+			return 2
+		}
+	}
+	return 0
 }
+
+// --- generated runner ---
+
+func runGenerated(evDir, contentDir, modPath string, pkgs []*pkg) (map[string]Check, string) {
+	absRoot, _ := filepath.Abs(contentDir)
+	genDir := filepath.Join(evDir, ".sbgen")
+	_ = os.RemoveAll(genDir)
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		return nil, err.Error()
+	}
+	defer os.RemoveAll(genDir)
+
+	var imports, calls strings.Builder
+	for i, p := range pkgs {
+		alias := fmt.Sprintf("p%d", i)
+		fmt.Fprintf(&imports, "\t%s %q\n", alias, p.ImportPath)
+		for _, f := range p.funcs {
+			if f.Results == 2 {
+				fmt.Fprintf(&calls, "\t{ v, err := %s.%s(); emit(%q, v, err) }\n", alias, f.GoName, f.Name)
+			} else {
+				fmt.Fprintf(&calls, "\t{ v := %s.%s(); emit(%q, v, nil) }\n", alias, f.GoName, f.Name)
+			}
+		}
+	}
+	// Evidence runs with the knowledge-base root as its working directory, so
+	// functions reference data relative to the KB (e.g. "data/sales.csv").
+	chdir := fmt.Sprintf("\tif err := os.Chdir(%q); err != nil { panic(err) }\n", absRoot)
+	src := "package main\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"reflect\"\n" +
+		imports.String() + ")\n\n" + runnerBody + "\nfunc main() {\n" + chdir + calls.String() +
+		"\tjson.NewEncoder(os.Stdout).Encode(out)\n}\n"
+	if err := os.WriteFile(filepath.Join(genDir, "main.go"), []byte(src), 0o644); err != nil {
+		return nil, err.Error()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), perRunTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "run", "./.sbgen")
+	cmd.Dir = evDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, msg
+	}
+	var out map[string]Check
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &out); err != nil {
+		return nil, "evidence runner produced invalid output: " + err.Error()
+	}
+	return out, ""
+}
+
+const runnerBody = `type check struct {
+	Value string     ` + "`json:\"value,omitempty\"`" + `
+	Table [][]string ` + "`json:\"table,omitempty\"`" + `
+	Error string     ` + "`json:\"error,omitempty\"`" + `
+}
+var out = map[string]check{}
+func emit(name string, v interface{}, err error) {
+	c := check{}
+	if err != nil {
+		c.Error = err.Error()
+	} else if rv := reflect.ValueOf(v); rv.IsValid() {
+		if s, ok := v.([][]string); ok {
+			c.Table = s
+		} else if rv.Kind() == reflect.Slice && rv.Len() > 0 && deref(rv.Index(0)).Kind() == reflect.Slice {
+			var t [][]string
+			for i := 0; i < rv.Len(); i++ {
+				row := deref(rv.Index(i))
+				var r []string
+				for j := 0; j < row.Len(); j++ {
+					r = append(r, fmt.Sprintf("%v", row.Index(j).Interface()))
+				}
+				t = append(t, r)
+			}
+			c.Table = t
+		} else {
+			c.Value = fmt.Sprintf("%v", v)
+		}
+	}
+	out[name] = c
+}
+func deref(v reflect.Value) reflect.Value {
+	if v.Kind() == reflect.Interface {
+		return v.Elem()
+	}
+	return v
+}
+`
+
+// --- cache key ---
 
 var reDeps = regexp.MustCompile(`(?m)^\s*//\s*starbase:deps\s+(.+)$`)
 
-// unitKey hashes a unit's Go sources, go.mod/go.sum, and declared data deps.
-func unitKey(dir string) (string, error) {
-	goFiles, _ := filepath.Glob(filepath.Join(dir, "*.go"))
-	sort.Strings(goFiles)
+func unitKey(p *pkg, contentDir string) string {
 	h := sha256.New()
 	depSet := map[string]bool{}
-	for _, gf := range goFiles {
+	files := append([]string(nil), p.GoFiles...)
+	sort.Strings(files)
+	for _, gf := range files {
 		b, err := os.ReadFile(gf)
 		if err != nil {
-			return "", err
+			continue
 		}
 		fmt.Fprintf(h, "go:%s\n", filepath.Base(gf))
 		h.Write(b)
 		for _, m := range reDeps.FindAllStringSubmatch(string(b), -1) {
 			for _, pat := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
-				matches, _ := filepath.Glob(filepath.Join(dir, pat))
+				// dep paths are relative to the KB root (the runner's CWD)
+				matches, _ := filepath.Glob(filepath.Join(contentDir, pat))
 				for _, mt := range matches {
 					depSet[mt] = true
 				}
 			}
-		}
-	}
-	for _, extra := range []string{"go.mod", "go.sum"} {
-		if b, err := os.ReadFile(filepath.Join(dir, extra)); err == nil {
-			fmt.Fprintf(h, "%s\n", extra)
-			h.Write(b)
 		}
 	}
 	deps := make([]string, 0, len(depSet))
@@ -162,74 +358,28 @@ func unitKey(dir string) (string, error) {
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(dir, dep)
+		rel, _ := filepath.Rel(p.Dir, dep)
 		fmt.Fprintf(h, "dep:%s\n", rel)
 		h.Write(b)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil))
 }
 
-func runUnit(dir string) (map[string]Check, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), perUnitTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "run", ".")
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, msg
-	}
-	checks, err := parseOutput(stdout.Bytes())
-	if err != nil {
-		return nil, "did not print a JSON result: " + err.Error()
-	}
-	return checks, ""
-}
+// --- kebab-case ---
 
-// parseOutput accepts either a single Check (keyed by ""), or a map of named
-// Checks. The "" name is later replaced by the unit's directory name.
-func parseOutput(b []byte) (map[string]Check, error) {
-	b = bytes.TrimSpace(b)
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, err
-	}
-	single := len(raw) > 0
-	for k := range raw {
-		if k != "value" && k != "table" && k != "error" {
-			single = false
-			break
+func kebab(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r + 32)
+		} else {
+			b.WriteRune(r)
 		}
 	}
-	if single {
-		var c Check
-		if err := json.Unmarshal(b, &c); err != nil {
-			return nil, err
-		}
-		return map[string]Check{"": c}, nil
-	}
-	out := map[string]Check{}
-	for k, v := range raw {
-		var c Check
-		if json.Unmarshal(v, &c) == nil {
-			out[k] = c
-		}
-	}
-	return out, nil
-}
-
-func merge(dst, src map[string]Check, unitName string) {
-	for k, v := range src {
-		name := k
-		if name == "" {
-			name = unitName
-		}
-		dst[name] = v
-	}
+	return b.String()
 }
 
 // --- persisted cache (user cache dir; CI starts cold) ---
