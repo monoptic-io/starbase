@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/monoptic-io/starbase/internal/assets"
 	"github.com/monoptic-io/starbase/internal/cache"
@@ -51,6 +50,8 @@ type Result struct {
 	Skipped     int
 	Verified    int // claims re-executed and matched
 	Attested    int // claims with evidence attached but no re-runnable check
+	UnitsRun    int // evidence units executed this run
+	UnitsCached int // evidence units served from cache (inputs unchanged)
 	Diagnostics []model.Diagnostic
 }
 
@@ -144,12 +145,23 @@ func Verify(cfg Config) (Result, error) {
 	}
 	res := Result{Topics: len(topics), Diagnostics: diags}
 
-	checks, present, rerr := evidence.Run(cfg.ContentDir, 120*time.Second)
+	rr, present, rerr := evidence.Run(cfg.ContentDir, cfg.Force)
 	if rerr != nil {
 		res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
 			Severity: model.SevError, File: "evidence", Message: rerr.Error()})
 		res.Diagnostics = dedupeDiags(res.Diagnostics)
 		return res, nil
+	}
+	for _, u := range rr.Units {
+		if u.Err != "" {
+			res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
+				Severity: model.SevError, File: "evidence/" + u.Name,
+				Message: fmt.Sprintf("evidence unit failed: %s", firstLine(u.Err))})
+		} else if u.Cached {
+			res.UnitsCached++
+		} else {
+			res.UnitsRun++
+		}
 	}
 
 	for _, t := range topics {
@@ -168,9 +180,9 @@ func Verify(cfg Config) (Result, error) {
 				if !present {
 					return fmt.Sprintf("claim references check %q but there is no evidence/ program", info.Check)
 				}
-				ck, ok := checks[info.Check]
+				ck, ok := rr.Checks[info.Check]
 				if !ok {
-					return fmt.Sprintf("evidence program produced no result named %q", info.Check)
+					return fmt.Sprintf("evidence produced no result named %q", info.Check)
 				}
 				if ck.Error != "" {
 					return fmt.Sprintf("check %q errored: %s", info.Check, ck.Error)
@@ -187,6 +199,13 @@ func Verify(cfg Config) (Result, error) {
 	}
 	res.Diagnostics = dedupeDiags(res.Diagnostics)
 	return res, nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // compareClaim returns "" if the claim's embedded evidence matches the computed

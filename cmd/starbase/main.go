@@ -176,15 +176,17 @@ func reorder(args []string) []string {
 func runVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	drafts := fs.Bool("drafts", false, "include draft topics")
+	force := fs.Bool("force", false, "re-run all evidence units, ignoring the cache")
 	fs.Parse(reorder(args))
 
-	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, OutDir: "_site"}
+	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, Force: *force, OutDir: "_site"}
 	res, err := build.Verify(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
 		return 1
 	}
 	printDiagnostics(res.Diagnostics)
+	fmt.Printf("evidence: %d unit(s) run, %d cached\n", res.UnitsRun, res.UnitsCached)
 	fmt.Printf("verified %d claim(s), %d attested (not re-run): %d error(s)\n",
 		res.Verified, res.Attested, res.Errors())
 	if res.Errors() > 0 {

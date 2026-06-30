@@ -92,16 +92,20 @@ executes nothing; it surfaces what the agent computed.
 coordination signal as a dead link: one agent asserts, the warning tells the swarm
 to go find the evidence (or correct the value).
 
-To make a number **un-fakeable**, bind a claim to a `check` and drop a Go program
-in `evidence/` that recomputes it (pure Go, or shelling out to DuckDB, a SQL
-driver, an API — whatever). `starbase verify` compiles and runs that program — the
-same way `go test` builds and runs tests — and **diffs every checked claim against
-the freshly computed result, failing the build on a mismatch.** The build, not the
-author, is the trust anchor: a fabricated value breaks CI. starbase ships no
-runners — the agent's Go does the work; starbase just builds, runs, and compares.
-So claims sort into **unsupported → attested → verified**, and a finished research
-KB drives load-bearing numbers to *verified*. See `examples/sales-research/` and
-the `research-claims` skill.
+To make a number **un-fakeable**, bind a claim to a `check` and drop a Go *unit*
+under `evidence/` that recomputes it (pure Go, or shelling out to DuckDB, a SQL
+driver, an API — whatever) and prints it as JSON. `starbase verify` compiles and
+runs the units — the same way `go test` builds and runs tests — and **diffs every
+checked claim against the freshly computed result, failing the build on a
+mismatch.** The build, not the author, is the trust anchor: a fabricated value
+breaks CI. starbase ships no runners — the agent's Go does the work.
+
+Verification is **incremental like `go test`**: each unit's result is cached keyed
+by a hash of its Go sources plus the data files it declares (`//starbase:deps …`),
+so a minutes-long simulation re-runs only when its own code or data changes —
+never when you edit an unrelated page. The cache is a local convenience; CI starts
+cold and is authoritative. Claims sort into **unsupported → attested → verified**.
+See `examples/sales-research/` and the `research-claims` skill.
 
 ## Third-party assets & offline builds
 

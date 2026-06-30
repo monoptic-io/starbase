@@ -1,6 +1,6 @@
-// Evidence program: computes the facts the findings assert, printing them as
-// JSON so `starbase verify` can diff them against the article. Pure stdlib here,
-// but it could just as well shell out to duckdb, hit a DB driver, etc.
+// Recomputes total 2025 revenue by division, descending.
+//
+//starbase:deps ../../data/sales.csv
 package main
 
 import (
@@ -11,13 +11,8 @@ import (
 	"strconv"
 )
 
-type check struct {
-	Value string     `json:"value,omitempty"`
-	Table [][]string `json:"table,omitempty"`
-}
-
 func main() {
-	f, err := os.Open("../data/sales.csv")
+	f, err := os.Open("../../data/sales.csv")
 	if err != nil {
 		panic(err)
 	}
@@ -27,12 +22,8 @@ func main() {
 	for i, h := range rows[0] {
 		col[h] = i
 	}
-	midwest := 0
 	rev := map[string]int{}
 	for _, r := range rows[1:] {
-		if r[col["division"]] == "Midwest" {
-			midwest++
-		}
 		v, _ := strconv.Atoi(r[col["revenue"]])
 		rev[r[col["division"]]] += v
 	}
@@ -49,8 +40,5 @@ func main() {
 	for _, e := range list {
 		table = append(table, []string{e.d, strconv.Itoa(e.t)})
 	}
-	json.NewEncoder(os.Stdout).Encode(map[string]check{
-		"midwest-regions":     {Value: strconv.Itoa(midwest)},
-		"revenue-by-division": {Table: table},
-	})
+	json.NewEncoder(os.Stdout).Encode(map[string]interface{}{"table": table})
 }

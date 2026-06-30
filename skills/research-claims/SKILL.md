@@ -52,21 +52,48 @@ write a program that recomputes it. `starbase verify` re-runs the program at bui
 time and **fails if the article and the computation disagree** — so the build, not
 the author, is the source of truth.
 
-Put a Go `main` package in `evidence/` (its own module). It can do anything —
-pure Go, or shell out to DuckDB, a SQL driver, an API — and prints a JSON object
-keyed by check name:
+Each check is a Go `main` package — a *unit* — under `evidence/`. It can do
+anything (pure Go, or shell out to DuckDB, a SQL driver, an API) and prints its
+result(s) as JSON: a single result named after its directory,
+
+```json
+{ "value": "4" }
+```
+
+or a map of named results,
 
 ```json
 { "midwest-regions": { "value": "4" },
   "revenue-by-division": { "table": [["division","total"],["Midwest","11400000"]] } }
 ```
 
-Then bind the claim with `check="midwest-regions"`. `verify` compares the
-claim's embedded `value`/result to the computed one (numbers are compared
-numerically, so `11,400,000` matches `11400000`).
+Bind the claim with `check="midwest-regions"`. `verify` compares the claim's
+embedded `value`/result to the computed one (numbers are compared numerically, so
+`11,400,000` matches `11400000`).
+
+### Incremental, like `go test`
+
+starbase caches each unit's result keyed by a hash of its Go sources **plus the
+data files it declares**:
+
+```go
+//starbase:deps ../../data/sales.csv
+```
+
+A unit is re-run only when its code or a declared dep changes. So:
+
+- editing an unrelated page never re-runs anything;
+- editing one check's code re-runs only that check;
+- changing a data file re-runs every unit that declares it.
+
+**Put each expensive check in its own package directory** so a minutes-long
+simulation isn't re-run when you touch something else. Always declare data deps,
+or the local cache can go stale. The cache is a local convenience: CI starts
+cold and re-runs everything, so CI is always authoritative.
 
 ```sh
-starbase verify <dir>   # re-runs evidence/, diffs every checked claim; exits 1 on mismatch
+starbase verify <dir>          # re-runs only changed units; diffs every checked claim
+starbase verify <dir> -force   # ignore the cache and re-run all units
 ```
 
 Wire `verify` into CI. A claim with a `check` that re-executes and matches is
