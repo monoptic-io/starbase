@@ -14,7 +14,7 @@ tour through the field, with live simulations you can poke on almost every page.
 
 {{< sim name="lorenz" caption="The Lorenz attractor — a deterministic system that never repeats. Watch it trace out its butterfly." >}}
 
-## Four ways in
+## Six ways in
 
 {{< columns count="2" >}}
 **[[Foundations]]** — the language of the field: [[State Space]],
@@ -23,6 +23,12 @@ tour through the field, with live simulations you can poke on almost every page.
 
 **[[Oscillations]]** — things that repeat: the [[Simple Harmonic Oscillator]],
 the [[Pendulum]], [[Resonance]], and self-sustaining [[Limit Cycle]]s.
+
+**[[Waves]]** — oscillation set loose in space: the [[Wave Equation]],
+[[Standing Wave]]s, [[Interference]], [[Beats]], and the [[Doppler Effect]].
+
+**[[Fourier Analysis]]** — every signal as a sum of sinusoids: [[Fourier Series]],
+the [[Fourier Transform]], [[Harmonics]], and the [[Uncertainty Principle]].
 
 **[[Chaos]]** — deterministic yet unpredictable: the [[Lorenz System]], the
 [[Double Pendulum]], the [[Logistic Map]], and [[Strange Attractor]]s.

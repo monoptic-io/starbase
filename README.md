@@ -10,6 +10,9 @@ simulations, and arbitrary interactive visualizations through a template system.
 Every problem it can detect — a dead link, a missing template argument, a broken
 template — is reported precisely, so an agent can iterate a subject to completion.
 
+**▶ See the live demo: https://monoptic-io.github.io/starbase/** — a knowledge
+base on dynamical systems, built and deployed from this repo by GitHub Actions.
+
 ## Install / build
 
 ```sh
@@ -119,7 +122,9 @@ The `skills/` directory contains authoring guides for agents:
 ## Demo
 
 `demo/` is a knowledge base on dynamical systems (foundations, oscillations,
-chaos, complex systems) authored to exercise the tool. Build it with:
+waves, Fourier analysis, chaos, complex systems) authored to exercise the tool.
+It is published live at **https://monoptic-io.github.io/starbase/**. Build it
+locally with:
 
 ```sh
 starbase build demo -o demo/_site -title "Dynamical Systems"
