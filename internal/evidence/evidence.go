@@ -1,22 +1,25 @@
 // Package evidence runs a knowledge base's checks and returns their output, so
 // claims can be verified by re-execution rather than trust.
 //
-// A check is a directory under `evidence/` containing an executable `run`:
+// A check is a directory under `evidence/` containing an executable `run` and an
+// optional `inputs` manifest:
 //
-//	evidence/midwest-regions/run   (chmod +x, any #! interpreter)
+//	evidence/midwest-regions/run      (chmod +x, any #! interpreter)
+//	evidence/midwest-regions/inputs   data/sales.csv
 //
-// The check's result is whatever `run` prints to stdout; a non-zero exit is an
-// error (its stderr is surfaced). The program can be anything — a shell one-liner
-// over DuckDB, a Python script, a Go program — because the contract is just
-// (stdout, exit code), like a golden test. `verify` compares that stdout, trimmed,
-// against the result a claim embeds, and fails the build when they disagree.
+// Each line of `inputs` names a source resolved by a provider — a local file or
+// an http(s) URL — and staged into a fresh working directory under its basename
+// (override with `source -> localname`). `run` executes there with that directory
+// as its CWD, so it reads inputs by name (`sales.csv`), never reaching into the
+// repo. Its stdout is the result; a non-zero exit is an error (stderr surfaced).
+// The program can be anything — a shell one-liner over DuckDB, Python, a binary —
+// because the contract is just (stdout, exit code), like a golden test. `verify`
+// compares that stdout, trimmed, against the result a claim embeds.
 //
 // It is incremental: each check is a cache unit keyed by a hash of its `run`
-// script plus the files it declares with `starbase:inputs`. A check re-runs only
-// when its script or a declared input changes. For inputs a static file list
-// can't name (a URL, a database, a clock), a check may add an executable `stamp`
-// whose stdout is a cheap fingerprint that also drives re-runs. The cache lives
-// in the user cache dir, so CI starts cold and is authoritative.
+// script, its `inputs` manifest, and the resolved content of every input. A check
+// re-runs only when one of those changes. The cache lives in the user cache dir,
+// so CI starts cold and is authoritative.
 package evidence
 
 import (
@@ -29,14 +32,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
 // Check is one check's result: the stdout of its `run`, or an error if `run`
-// exited non-zero.
+// exited non-zero (or an input could not be resolved).
 type Check struct {
 	Output string `json:"output"`
 	Err    string `json:"err,omitempty"`
@@ -59,18 +61,11 @@ const perRunTimeout = 20 * time.Minute
 
 // Run resolves every check under evidence/, reusing cached output whose inputs
 // are unchanged and re-running the rest. The bool reports whether evidence exists.
-//
-// A check re-runs when its `run` script or a declared starbase:inputs file
-// changed (the static key, computed without executing anything), or — for checks
-// with a `stamp` — when their stamp differs from the cached one. Checks with a
-// stamp always pay for the cheap stamp; only those whose stamp (or static key)
-// moved pay for the expensive run.
 func Run(contentDir string, force bool) (Result, bool, error) {
 	evDir := filepath.Join(contentDir, "evidence")
 	if fi, err := os.Stat(evDir); err != nil || !fi.IsDir() {
 		return Result{}, false, nil
 	}
-	absRoot, _ := filepath.Abs(contentDir)
 	entries, err := os.ReadDir(evDir)
 	if err != nil {
 		return Result{}, true, err
@@ -78,10 +73,9 @@ func Run(contentDir string, force bool) (Result, bool, error) {
 
 	cache := loadCache(contentDir)
 	res := Result{Checks: map[string]Check{}}
-
-	useCached := func(name string, c cachedUnit) {
-		res.Checks[name] = c.Check
-		res.Units = append(res.Units, Unit{Name: name, Cached: true})
+	record := func(name string, ck Check, cached bool) {
+		res.Checks[name] = ck
+		res.Units = append(res.Units, Unit{Name: name, Cached: cached, Err: ck.Err})
 	}
 
 	for _, e := range entries {
@@ -89,43 +83,104 @@ func Run(contentDir string, force bool) (Result, bool, error) {
 		if !e.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
-		runPath := filepath.Join(evDir, name, "run")
+		dir := filepath.Join(evDir, name)
+		runPath := filepath.Join(dir, "run")
 		if !isExecutable(runPath) {
-			continue // a directory without an executable run/ is not a check
+			continue // a directory without an executable run is not a check
 		}
-		staticKey := unitKey(runPath, contentDir)
-		stampPath := filepath.Join(evDir, name, "stamp")
-		hasStamp := isExecutable(stampPath)
+		runBytes, err := os.ReadFile(runPath)
+		if err != nil {
+			record(name, Check{Err: err.Error()}, false)
+			continue
+		}
+		manifest, _ := os.ReadFile(filepath.Join(dir, "inputs"))
 
-		c, cached := cache[name]
-		staticFresh := cached && c.StaticKey == staticKey
-		if !force && staticFresh && !hasStamp {
-			useCached(name, c) // nothing to execute
+		// Resolve inputs (the http provider may fetch). A resolution failure —
+		// missing file, 404 — is the check's error.
+		inputs, rerr := resolveInputs(parseInputs(manifest), contentDir, force)
+		if rerr != "" {
+			record(name, Check{Err: rerr}, false)
 			continue
 		}
 
-		stamp := ""
-		if hasStamp {
-			out, serr := execScript(stampPath, absRoot)
-			if serr != "" {
-				stamp = "stamp error: " + serr // forces a (re)run and differs from any prior stamp
-			} else {
-				stamp = strings.TrimSpace(out)
-			}
-		}
-		if !force && staticFresh && hasStamp && stamp == c.Stamp {
-			useCached(name, c) // stamp matched: skip the expensive run
+		key := computeKey(runBytes, manifest, inputs)
+		if c, ok := cache[name]; ok && c.Key == key && !force {
+			record(name, c.Check, true)
 			continue
 		}
 
-		out, rerr := execScript(runPath, absRoot)
-		ck := Check{Output: out, Err: rerr}
-		cache[name] = cachedUnit{StaticKey: staticKey, Stamp: stamp, Check: ck}
-		res.Checks[name] = ck
-		res.Units = append(res.Units, Unit{Name: name, Err: ck.Err})
+		out, runErr := runStaged(runPath, inputs)
+		ck := Check{Output: out, Err: runErr}
+		cache[name] = cachedUnit{Key: key, Check: ck}
+		record(name, ck, false)
 	}
 	saveCache(contentDir, cache)
 	return res, true, nil
+}
+
+// parseInputs reads an `inputs` manifest: one source per line, comments with #,
+// optional rename via `source -> localname` (or `-->`).
+func parseInputs(b []byte) []inputSpec {
+	var specs []inputSpec
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		src, name := line, ""
+		for _, sep := range []string{"-->", "->"} {
+			if i := strings.Index(line, sep); i >= 0 {
+				src = strings.TrimSpace(line[:i])
+				name = strings.TrimSpace(line[i+len(sep):])
+				break
+			}
+		}
+		specs = append(specs, inputSpec{Source: src, LocalName: name})
+	}
+	return specs
+}
+
+func resolveInputs(specs []inputSpec, contentDir string, force bool) ([]resolved, string) {
+	var out []resolved
+	for _, s := range specs {
+		r, err := providerFor(s.Source).resolve(s, contentDir, force)
+		if err != nil {
+			return nil, fmt.Sprintf("input %q: %s", s.Source, err)
+		}
+		out = append(out, r)
+	}
+	return out, ""
+}
+
+// runStaged materializes the inputs into a fresh temp dir and runs the check
+// there, so it sees only its declared inputs (by local name).
+func runStaged(runPath string, inputs []resolved) (stdout, errMsg string) {
+	stage, err := os.MkdirTemp("", "starbase-ev-")
+	if err != nil {
+		return "", err.Error()
+	}
+	defer os.RemoveAll(stage)
+	for _, r := range inputs {
+		if err := r.realize(filepath.Join(stage, r.LocalName)); err != nil {
+			return "", fmt.Sprintf("staging %s: %s", r.LocalName, err)
+		}
+	}
+	return execScript(runPath, stage)
+}
+
+// computeKey is the content-addressed cache key: the run script, the manifest,
+// and every input's resolved content hash.
+func computeKey(runBytes, manifest []byte, inputs []resolved) string {
+	h := sha256.New()
+	h.Write(runBytes)
+	h.Write([]byte{0})
+	h.Write(manifest)
+	sorted := append([]resolved(nil), inputs...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].LocalName < sorted[j].LocalName })
+	for _, r := range sorted {
+		fmt.Fprintf(h, "\x00%s\x00%s", r.LocalName, r.Hash)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func isExecutable(path string) bool {
@@ -133,9 +188,8 @@ func isExecutable(path string) bool {
 	return err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
 }
 
-// execScript runs an executable with the knowledge-base root as its working
-// directory (so it references data as "data/sales.csv"). It returns stdout and,
-// on a non-zero exit, the stderr (or the error) — empty stderr means success.
+// execScript runs an executable with the given working directory, returning
+// stdout and, on a non-zero exit, the stderr (or the error).
 func execScript(path, cwd string) (stdout, errMsg string) {
 	ctx, cancel := context.WithTimeout(context.Background(), perRunTimeout)
 	defer cancel()
@@ -153,55 +207,11 @@ func execScript(path, cwd string) (stdout, errMsg string) {
 	return out.String(), ""
 }
 
-// --- cache key ---
-
-// reInputs matches a declaration line in any comment style, e.g.
-//
-//	# starbase:inputs data/sales.csv other/*.csv
-//	// starbase:inputs data/sales.csv
-var reInputs = regexp.MustCompile(`(?m)^.*?starbase:inputs[ \t]+(.+)$`)
-
-func unitKey(runPath, contentDir string) string {
-	h := sha256.New()
-	b, err := os.ReadFile(runPath)
-	if err != nil {
-		return ""
-	}
-	h.Write(b)
-
-	depSet := map[string]bool{}
-	for _, m := range reInputs.FindAllStringSubmatch(string(b), -1) {
-		for _, pat := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
-			// inputs are relative to the KB root (the run script's CWD)
-			matches, _ := filepath.Glob(filepath.Join(contentDir, pat))
-			for _, mt := range matches {
-				depSet[mt] = true
-			}
-		}
-	}
-	deps := make([]string, 0, len(depSet))
-	for d := range depSet {
-		deps = append(deps, d)
-	}
-	sort.Strings(deps)
-	for _, dep := range deps {
-		fb, err := os.ReadFile(dep)
-		if err != nil {
-			continue
-		}
-		rel, _ := filepath.Rel(contentDir, dep)
-		fmt.Fprintf(h, "\x00input:%s\x00", rel)
-		h.Write(fb)
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 // --- persisted cache (user cache dir; CI starts cold) ---
 
 type cachedUnit struct {
-	StaticKey string `json:"static_key"` // hash of run script + declared inputs
-	Stamp     string `json:"stamp,omitempty"`
-	Check     Check  `json:"check"`
+	Key   string `json:"key"`
+	Check Check  `json:"check"`
 }
 
 func cachePath(contentDir string) string {

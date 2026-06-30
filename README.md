@@ -92,31 +92,36 @@ executes nothing; it surfaces what the agent computed.
 coordination signal as a dead link: one agent asserts, the warning tells the swarm
 to go find the evidence (or correct the value).
 
-To make a number **un-fakeable**, bind a claim to a `check` and drop an executable
-`run` in `evidence/<check>/` that recomputes it. The contract is just
-`(stdout, exit code)`, like a golden test — so `run` can be anything:
+To make a number **un-fakeable**, bind a claim to a `check` and add a directory
+under `evidence/<check>/` with an executable `run` and an `inputs` manifest:
 
-```sh
-# evidence/midwest-regions/run        (chmod +x)
-# starbase:inputs data/sales.csv
-awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' data/sales.csv
+```
+evidence/midwest-regions/inputs        # one source per line
+  data/sales.csv                       #   a local file…
+  https://example.com/feed.csv         #   …or an http(s) URL (fetched + cached)
+  https://example.com/d.csv -> d.csv   #   …optionally renamed
+
+evidence/midwest-regions/run           # chmod +x, any #! interpreter
+  awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' sales.csv
 ```
 
-`starbase verify` runs each `run` with the KB root as its working directory and
-**compares its stdout, trimmed, against the result the claim embeds — failing the
-build on any mismatch** (a non-zero exit is a check failure; its stderr is
-surfaced). The build, not the author, is the trust anchor: a fabricated value
-breaks CI. Because the contract is text in / text out, a check is any executable
-— a shell one-liner over DuckDB, a Python script, a compiled Go program.
+Each input is resolved by a **provider** (file or http), staged into a fresh
+working directory under its name, and `run` executes there — so it reads inputs
+by name (`sales.csv`), nothing else. `starbase verify` **compares `run`'s stdout,
+trimmed, against the result the claim embeds — failing the build on any mismatch**
+(a non-zero exit, or an unresolvable input, is a check failure). The build, not
+the author, is the trust anchor: a fabricated value breaks CI. Because the
+contract is text in / text out, a check is any executable — a shell one-liner over
+DuckDB, a Python script, a compiled Go program.
 
 Verification is **incremental like `go test`**: each check is cached keyed by a
-hash of its `run` script plus the files it declares with `starbase:inputs`, so a
-minutes-long simulation re-runs only when its script or data changes — never when
-you edit an unrelated page. For inputs a static file list can't name (a URL, a
-database, a clock), add an executable `stamp` whose stdout is a cheap fingerprint
-that drives re-runs the same way. The cache is a local convenience; CI starts cold
-and is authoritative. Claims sort into **unsupported → attested → verified**. See
-`examples/sales-research/` and the `research-claims` skill.
+hash of its `run` script, its `inputs` manifest, and the resolved content of every
+input, so a minutes-long check re-runs only when one of those changes — never when
+you edit an unrelated page. Fetched URLs are treated as immutable between builds
+(a local verify reuses the cached bytes); the cache is a local convenience, and CI
+starts cold, so the **output comparison** — not input pinning — is what catches a
+source that has drifted. Claims sort into **unsupported → attested → verified**.
+See `examples/sales-research/` and the `research-claims` skill.
 
 ## Third-party assets & offline builds
 

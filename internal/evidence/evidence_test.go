@@ -1,6 +1,9 @@
 package evidence
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,37 +16,50 @@ func write(t *testing.T, path, content string, mode os.FileMode) {
 	}
 }
 
-func TestUnitKeyReflectsScriptAndInputs(t *testing.T) {
-	dir := t.TempDir()
-	data := filepath.Join(dir, "data.csv")
-	write(t, data, "a,b\n1,2\n", 0o644)
-	run := filepath.Join(dir, "run")
-	write(t, run, "#!/bin/sh\n# starbase:inputs data.csv\ncat data.csv\n", 0o755)
+// isolate the user cache dir so the persisted result/input caches don't leak
+// between tests or machines.
+func isolateCache(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+}
 
-	k1 := unitKey(run, dir)
-	if k1 == "" || unitKey(run, dir) != k1 {
-		t.Fatal("key must be non-empty and stable when nothing changes")
+func TestParseInputs(t *testing.T) {
+	specs := parseInputs([]byte("# a comment\ndata/sales.csv\n\nhttp://x/y.csv -> y.csv\nhttp://x/z.csv --> renamed.csv\n"))
+	want := []inputSpec{
+		{Source: "data/sales.csv"},
+		{Source: "http://x/y.csv", LocalName: "y.csv"},
+		{Source: "http://x/z.csv", LocalName: "renamed.csv"},
 	}
-	write(t, data, "a,b\n9,9\n", 0o644)
-	if unitKey(run, dir) == k1 {
-		t.Fatal("key must change when a declared input changes")
+	if len(specs) != len(want) {
+		t.Fatalf("got %d specs, want %d: %+v", len(specs), len(want), specs)
 	}
-	k2 := unitKey(run, dir)
-	write(t, run, "#!/bin/sh\n# starbase:inputs data.csv\nhead -1 data.csv\n", 0o755)
-	if unitKey(run, dir) == k2 {
-		t.Fatal("key must change when the run script changes")
+	for i := range want {
+		if specs[i] != want[i] {
+			t.Errorf("spec %d = %+v, want %+v", i, specs[i], want[i])
+		}
 	}
 }
 
-func TestRunExecutesCachesAndReruns(t *testing.T) {
-	kb := t.TempDir()
-	ev := filepath.Join(kb, "evidence", "greeting")
-	if err := os.MkdirAll(ev, 0o755); err != nil {
+func mkCheck(t *testing.T, kb, name, run, inputs string) {
+	t.Helper()
+	dir := filepath.Join(kb, "evidence", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	write(t, filepath.Join(dir, "run"), run, 0o755)
+	if inputs != "" {
+		write(t, filepath.Join(dir, "inputs"), inputs, 0o644)
+	}
+}
+
+func TestRunStagesCachesAndReruns(t *testing.T) {
+	isolateCache(t)
+	kb := t.TempDir()
 	write(t, filepath.Join(kb, "name.txt"), "world\n", 0o644)
-	write(t, filepath.Join(ev, "run"),
-		"#!/bin/sh\n# starbase:inputs name.txt\nprintf 'hello %s' \"$(cat name.txt)\"\n", 0o755)
+	// reads the input by its staged basename, not its repo path
+	mkCheck(t, kb, "greeting", "#!/bin/sh\nprintf 'hello %s' \"$(cat name.txt)\"\n", "name.txt\n")
 
 	r, present, err := Run(kb, false)
 	if err != nil || !present {
@@ -52,17 +68,15 @@ func TestRunExecutesCachesAndReruns(t *testing.T) {
 	if got := r.Checks["greeting"]; got.Output != "hello world" || got.Err != "" {
 		t.Fatalf("output=%q err=%q", got.Output, got.Err)
 	}
-	if len(r.Units) != 1 || r.Units[0].Cached {
-		t.Fatalf("first run should execute, got %+v", r.Units)
+	if r.Units[0].Cached {
+		t.Fatal("first run should execute")
 	}
 
-	// unchanged -> cached
 	r, _, _ = Run(kb, false)
 	if !r.Units[0].Cached {
-		t.Fatal("second run should be cached")
+		t.Fatal("unchanged inputs should hit the cache")
 	}
 
-	// changed input -> re-run with new output
 	write(t, filepath.Join(kb, "name.txt"), "moon\n", 0o644)
 	r, _, _ = Run(kb, false)
 	if r.Units[0].Cached || r.Checks["greeting"].Output != "hello moon" {
@@ -70,16 +84,48 @@ func TestRunExecutesCachesAndReruns(t *testing.T) {
 	}
 }
 
-func TestNonZeroExitIsError(t *testing.T) {
-	kb := t.TempDir()
-	ev := filepath.Join(kb, "evidence", "boom")
-	if err := os.MkdirAll(ev, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(ev, "run"), "#!/bin/sh\necho nope >&2\nexit 3\n", 0o755)
+func TestHTTPProviderFetchesOnceThenCaches(t *testing.T) {
+	isolateCache(t)
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		fmt.Fprint(w, "x,y\n1,2\n")
+	}))
+	defer srv.Close()
 
+	kb := t.TempDir()
+	mkCheck(t, kb, "remote", "#!/bin/sh\ncat data.csv\n", srv.URL+"/data.csv -> data.csv\n")
+
+	r, _, _ := Run(kb, false)
+	if got := r.Checks["remote"].Output; got != "x,y\n1,2\n" {
+		t.Fatalf("output=%q", got)
+	}
+	if hits != 1 {
+		t.Fatalf("expected 1 fetch, got %d", hits)
+	}
+	// second run: cached bytes reused, no re-fetch (URL treated as immutable)
+	Run(kb, false)
+	if hits != 1 {
+		t.Fatalf("expected no re-fetch on cached run, got %d hits", hits)
+	}
+}
+
+func TestNonZeroExitIsError(t *testing.T) {
+	isolateCache(t)
+	kb := t.TempDir()
+	mkCheck(t, kb, "boom", "#!/bin/sh\necho nope >&2\nexit 3\n", "")
 	r, _, _ := Run(kb, true)
-	if got := r.Checks["boom"]; got.Err == "" {
-		t.Fatalf("non-zero exit should surface an error, got %+v", got)
+	if r.Checks["boom"].Err == "" {
+		t.Fatalf("non-zero exit should surface an error, got %+v", r.Checks["boom"])
+	}
+}
+
+func TestMissingInputIsError(t *testing.T) {
+	isolateCache(t)
+	kb := t.TempDir()
+	mkCheck(t, kb, "needs", "#!/bin/sh\ncat gone.csv\n", "gone.csv\n")
+	r, _, _ := Run(kb, true)
+	if r.Checks["needs"].Err == "" {
+		t.Fatal("a missing input should surface an error before running")
 	}
 }

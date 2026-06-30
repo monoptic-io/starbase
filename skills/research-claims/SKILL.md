@@ -52,65 +52,56 @@ write a program that recomputes it. `starbase verify` re-runs the program at bui
 time and **fails if the article and the computation disagree** — so the build, not
 the author, is the source of truth.
 
-A check is a directory under `evidence/` containing an executable `run`. The
-contract is just **stdout and exit code**, like a golden test — so `run` can be
-*any* program. Bind it to a claim with `check="<directory name>"`:
+A check is a directory under `evidence/` containing an executable `run` and an
+`inputs` manifest. The contract is just **stdout and exit code**, like a golden
+test — so `run` can be *any* program. Bind it to a claim with
+`check="<directory name>"`:
 
-```sh
-# evidence/midwest-regions/run        (chmod +x — needs a #! line)
-# starbase:inputs data/sales.csv
-awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' data/sales.csv
+```
+evidence/midwest-regions/inputs        # one source per line; # comments allowed
+  data/sales.csv                       #   a local file (relative to the KB root)…
+  https://example.com/feed.csv         #   …or an http(s) URL
+  https://example.com/d.csv -> d.csv   #   …optionally renamed with -> name
+
+evidence/midwest-regions/run           # chmod +x — needs a #! line
+  awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' sales.csv
 ```
 
-`verify` runs `./run` with the **KB root as the working directory** (so it reads
-`data/sales.csv`, not `../../data/...`), and compares its **stdout, trimmed,
-against the result the claim embeds** — its result block if it has one, else its
-`value`. The comparison is **exact text**, not numeric: `11.4M` does *not* match
-`11400000`, so make both sides agree (let the program print what the prose says,
-or vice-versa). A non-zero exit is a check failure; its stderr is reported at
-`evidence/<check>/run`. Because the contract is text, the program can be a shell
-one-liner over DuckDB, a Python script, a compiled binary — whatever fits.
+Each input is resolved by a **provider** (file or http) and staged into a fresh
+working directory under its basename; `verify` runs `./run` **there**, so it reads
+inputs by name (`sales.csv`) and sees nothing else. It compares `run`'s **stdout,
+trimmed, against the result the claim embeds** — its result block if it has one,
+else its `value`. The comparison is **exact text**, not numeric: `11.4M` does
+*not* match `11400000`, so make both sides agree (let the program print what the
+prose says, or vice-versa). A non-zero exit — or an input that won't resolve (a
+missing file, a 404) — is a check failure, reported at `evidence/<check>/run`.
+Because the contract is text, the program can be a shell one-liner over DuckDB, a
+Python script, a compiled binary — whatever fits.
 
 Show the reader the *real* command — paste `run` (or its core) as the claim's
 implementation, so the drawer matches what the build executes.
 
 ### Incremental, like `go test`
 
-starbase caches each check keyed by a hash of its `run` script **plus the files
-it declares** with `starbase:inputs` (relative to the KB root). A check re-runs
-only when its script or a declared input changes:
+starbase caches each check keyed by a hash of its `run` script, its `inputs`
+manifest, and the **resolved content of every input**. A check re-runs only when
+one of those changes:
 
 - editing an unrelated page never re-runs anything;
 - editing one check's `run` re-runs only that check;
-- changing a data file re-runs every check that declares it.
+- changing a declared input re-runs every check that uses it.
 
 **One expensive check per directory** so a minutes-long run isn't re-run when you
-touch something else. Always declare your inputs, or the local cache can go stale.
-The cache is a local convenience: CI starts cold and re-runs everything, so CI is
-authoritative.
+touch something else. A fetched URL is treated as immutable between builds — a
+local `verify` reuses the cached bytes rather than re-fetching. That's safe
+because the cache is only a local convenience: CI starts cold, re-fetches, and the
+**output comparison** catches any source that has drifted. So you don't pin URLs;
+you let the build fail when the recomputed output stops matching the article.
 
 ```sh
 starbase verify <dir>          # re-runs only changed checks; diffs every checked claim
-starbase verify <dir> -force   # ignore the cache and re-run everything
+starbase verify <dir> -force   # ignore the cache, re-fetch URLs, re-run everything
 ```
-
-### Inputs `starbase:inputs` can't name: add a `stamp`
-
-`starbase:inputs` only hashes files. When a check's real input isn't a static
-file — a URL, a database, a clock — add an executable `stamp` next to `run` whose
-stdout is a cheap fingerprint that changes whenever the input does:
-
-```sh
-# evidence/live-feed/stamp        (chmod +x — cheap; run is the expensive part)
-curl -sI https://api.example.com/feed | grep -i etag        # or: a row-version query
-```
-
-starbase always runs `stamp` (keep it cheap) but re-runs the expensive `run` only
-when the stamp — or the `run` script — changes. Print a **constant** to mean "only
-re-run when my script changes"; print an **always-different** value to mean "never
-cache — always re-run." A `stamp` doesn't make the cache *sound* — you can still
-miss an input, exactly as you can forget a `starbase:inputs` line — but it makes
-non-file inputs *expressible*. CI's cold run remains the backstop.
 
 Wire `verify` into CI. A claim with a `check` that re-executes and matches is
 **verified**; one with only a pasted result is **attested**; one with neither is

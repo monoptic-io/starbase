@@ -1,6 +1,5 @@
 #!/bin/sh
-# starbase:inputs data/sales.csv
+# inputs: data/sales.csv  (staged here as sales.csv)
 # Total 2025 revenue per division, highest first.
 echo "division,total"
-awk -F, 'NR>1{r[$2]+=$3} END{for(d in r) print d","r[d]}' data/sales.csv | sort -t, -k2,2nr
-
+awk -F, 'NR>1{r[$2]+=$3} END{for(d in r) print d","r[d]}' sales.csv | sort -t, -k2,2nr
