@@ -2,8 +2,11 @@
 (function () {
   "use strict";
 
+  var staticWidgets = []; // {redraw} for charts/plots, repainted on theme change
+
   document.addEventListener("DOMContentLoaded", function () {
-    initThemeToggle();
+    initTheme();
+    initSidebarScroll();
     initTOC();
     initWidgets();
     initMath();
@@ -19,15 +22,30 @@
     });
   };
 
-  function initThemeToggle() {
+  function initTheme() {
     var saved = localStorage.getItem("sg-theme");
     if (saved) document.documentElement.setAttribute("data-theme", saved);
+    var cur = document.documentElement.getAttribute("data-theme") || "dark";
+    document.querySelectorAll(".sg-theme-select").forEach(function (sel) { sel.value = cur; });
   }
-  window.sgToggleTheme = function () {
-    var cur = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", cur);
-    localStorage.setItem("sg-theme", cur);
+  window.sgSetTheme = function (name) {
+    document.documentElement.setAttribute("data-theme", name);
+    try { localStorage.setItem("sg-theme", name); } catch (e) {}
+    document.querySelectorAll(".sg-theme-select").forEach(function (sel) { sel.value = name; });
+    // Static visuals (charts/plots) are drawn once — repaint them in the new palette.
+    // Animated sims/sketches read CSS variables every frame and adapt on their own.
+    staticWidgets.forEach(function (w) { try { w.redraw(); } catch (e) {} });
   };
+
+  /* scroll the sidebar so the current page sits in view among its neighbors */
+  function initSidebarScroll() {
+    var nav = document.querySelector(".sg-nav");
+    if (!nav) return;
+    var active = nav.querySelector('[aria-current="page"]');
+    if (!active) return;
+    var navRect = nav.getBoundingClientRect(), aRect = active.getBoundingClientRect();
+    nav.scrollTop += (aRect.top - navRect.top) - nav.clientHeight / 2 + aRect.height / 2;
+  }
 
   /* ---------------- table of contents scrollspy ---------------- */
   function initTOC() {
@@ -212,6 +230,7 @@
       }
     }
     render();
+    staticWidgets.push({ redraw: render });
   }
 
   function drawPlot(canvas, c) {
@@ -248,6 +267,7 @@
       });
     }
     render();
+    staticWidgets.push({ redraw: render });
   }
 
   /* ---- animation loop with play/pause/reset ---- */

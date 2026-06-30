@@ -14,11 +14,26 @@
 <button class="sg-menu-toggle" aria-label="Toggle navigation" onclick="document.body.classList.toggle('sg-nav-open')">☰</button>
 <div class="sg-shell">
   <aside class="sg-sidebar">
-    <a class="sg-brand" href="{{ .RootRel }}index.html">{{ .Site.Title }}</a>
-    <input class="sg-filter" type="search" placeholder="Filter topics…" oninput="sgFilterNav(this.value)" aria-label="Filter topics">
+    <div class="sg-sidebar-head">
+      <a class="sg-brand" href="{{ .RootRel }}index.html">{{ .Site.Title }}</a>
+      <input class="sg-filter" type="search" placeholder="Filter topics…" oninput="sgFilterNav(this.value)" aria-label="Filter topics">
+    </div>
     <nav class="sg-nav">
       {{- template "navtree" .Nav }}
     </nav>
+    <div class="sg-sidebar-foot">
+      <label class="sg-theme">
+        <span>Theme</span>
+        <select class="sg-theme-select" aria-label="Color theme" onchange="sgSetTheme(this.value)">
+          <option value="dark">Midnight</option>
+          <option value="light">Daylight</option>
+          <option value="nord">Nord</option>
+          <option value="solarized">Solarized</option>
+          <option value="grape">Grape</option>
+          <option value="forest">Forest</option>
+        </select>
+      </label>
+    </div>
   </aside>
 
   <div class="sg-main-wrap">
