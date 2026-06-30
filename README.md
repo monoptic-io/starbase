@@ -10,6 +10,12 @@ simulations, and arbitrary interactive visualizations through a template system.
 Every problem it can detect — a dead link, a missing template argument, a broken
 template — is reported precisely, so an agent can iterate a subject to completion.
 
+The sidebar adapts to the link graph: each page shows only its own **connected
+component** — its reachable "world" — so disjoint subjects stay in separate,
+focused navigations that merge automatically the moment a single link bridges
+them. A build-emitted index powers a **search box** that spans every component,
+so you can always jump anywhere.
+
 **▶ See the live demo: https://monoptic-io.github.io/starbase/** — an interactive
 field guide to systems, signals & computation, built and deployed from this repo
 by GitHub Actions.
@@ -107,10 +113,11 @@ starbase build site -o _site --vendor --offline   # cache only, no network
 parse      frontmatter + wiki links + shortcodes (code-fence aware)
 registry   resolve link names → topics (titles, aliases, slugs)
 graph      backlinks, PageRank authority, related = direct links
-           + co-citation + bibliographic coupling
+           + co-citation + bibliographic coupling, connected components
 render     goldmark → HTML, heading anchors + TOC, shortcode expansion,
-           math, page layout with related/backlinks panels
-build      per-page fingerprints drive incremental rendering
+           math, page layout, component-scoped collapsible sidebar
+build      per-page fingerprints drive incremental rendering;
+           emits a search index spanning all components
 ```
 
 The `internal/` packages are small and single-purpose
@@ -123,10 +130,12 @@ The `skills/` directory contains authoring guides for agents:
 
 ## Demo
 
-`demo/` is a 12-section interactive field guide — dynamical-systems foundations,
+`demo/` is a 15-section interactive field guide — dynamical-systems foundations,
 oscillations, waves, Fourier analysis, chaos, complex systems, linear algebra,
 graph theory & networks, probability, information theory, optimization & learning,
-and cryptography — authored by sub-agents to exercise the tool.
+cryptography, number theory, and computability & complexity — plus a deliberately
+disjoint **music theory** section that demonstrates the reachability-scoped
+sidebar. Authored by sub-agents to exercise the tool.
 It is published live at **https://monoptic-io.github.io/starbase/**. Build it
 locally with:
 

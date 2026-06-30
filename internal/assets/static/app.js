@@ -47,6 +47,95 @@
     nav.scrollTop += (aRect.top - navRect.top) - nav.clientHeight / 2 + aRect.height / 2;
   }
 
+  /* ---------------- audio: a tiny synth sketches can call ----------------
+     Browsers require audio to begin from a user gesture, so we unlock the
+     context on the first pointer/key event; sketches then call sgTone(freq). */
+  function audioCtx() {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!window.__sgAudio) window.__sgAudio = new Ctx();
+    if (window.__sgAudio.state === "suspended") window.__sgAudio.resume();
+    return window.__sgAudio;
+  }
+  document.addEventListener("pointerdown", audioCtx);
+  document.addEventListener("keydown", audioCtx);
+  window.sgTone = function (freq, dur, type) {
+    try {
+      var ac = audioCtx();
+      if (!ac || !freq) return;
+      dur = dur || 0.6;
+      var osc = ac.createOscillator(), g = ac.createGain(), t0 = ac.currentTime;
+      osc.type = type || "triangle";
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      osc.connect(g); g.connect(ac.destination);
+      osc.start(t0); osc.stop(t0 + dur + 0.02);
+    } catch (e) {}
+  };
+  window.sgChord = function (freqs, dur, type) {
+    (freqs || []).forEach(function (f) { window.sgTone(f, dur, type); });
+  };
+
+  /* ---------------- global topic search ---------------- */
+  // The sidebar shows only the current page's connected component; search spans
+  // the whole knowledge base so you can always jump to any "world".
+  var sgIndex = null, sgLoading = false;
+  function siteRoot() {
+    var s = document.querySelector('script[src*="app.js"]');
+    return (s ? s.getAttribute("src") : "").replace(/static\/app\.js.*$/, "");
+  }
+  function loadIndex(cb) {
+    if (sgIndex) { cb(sgIndex); return; }
+    if (sgLoading) return;
+    sgLoading = true;
+    fetch(siteRoot() + "search.json")
+      .then(function (r) { return r.json(); })
+      .then(function (j) { sgIndex = j; cb(j); })
+      .catch(function () { sgIndex = []; });
+  }
+  function esc(s) {
+    return (s || "").replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  window.sgSearch = function (q) {
+    q = (q || "").trim().toLowerCase();
+    var box = document.getElementById("sg-search-results");
+    if (!box) return;
+    if (!q) { box.hidden = true; box.innerHTML = ""; return; }
+    loadIndex(function (idx) {
+      var hits = idx.filter(function (e) {
+        return (e.t + " " + e.s + " " + (e.d || "")).toLowerCase().indexOf(q) !== -1;
+      });
+      hits.sort(function (a, b) {
+        return (a.t.toLowerCase().indexOf(q) === 0 ? 0 : 1) - (b.t.toLowerCase().indexOf(q) === 0 ? 0 : 1);
+      });
+      hits = hits.slice(0, 14);
+      var root = siteRoot();
+      box.innerHTML = hits.length
+        ? hits.map(function (e) {
+          return '<a class="sg-search-hit" href="' + root + e.u + '"><span class="sg-search-t">' +
+            esc(e.t) + "</span>" + (e.s ? '<span class="sg-search-s">' + esc(e.s) + "</span>" : "") + "</a>";
+        }).join("")
+        : '<div class="sg-search-empty">No matches</div>';
+      box.hidden = false;
+    });
+  };
+  window.sgSearchKey = function (ev) {
+    var box = document.getElementById("sg-search-results");
+    if (ev.key === "Escape") { if (box) box.hidden = true; ev.target.value = ""; return; }
+    if (ev.key === "Enter" && box && !box.hidden) {
+      var first = box.querySelector("a");
+      if (first) window.location.href = first.getAttribute("href");
+    }
+  };
+  document.addEventListener("click", function (e) {
+    var box = document.getElementById("sg-search-results");
+    if (box && !box.hidden && !e.target.closest(".sg-search")) box.hidden = true;
+  });
+
   /* ---------------- table of contents scrollspy ---------------- */
   function initTOC() {
     var links = Array.prototype.slice.call(document.querySelectorAll(".sg-toc-rail .sg-toc a"));

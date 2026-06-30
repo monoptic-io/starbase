@@ -59,7 +59,24 @@ the [[Central Limit Theorem]], [[Markov Chain]]s, and [[Brownian Motion]].
 **[[Cryptography]]** — keeping secrets and proving identity: the [[Caesar Cipher]],
 the unbreakable [[One-Time Pad]], [[Diffie–Hellman]] key exchange, [[RSA]], and
 [[Digital Signature]]s.
+
+**[[Number Theory]]** — the integers and their secrets: [[Prime Number]]s, the
+[[Sieve of Eratosthenes]], the [[Greatest Common Divisor|Euclidean algorithm]],
+and the [[Ulam Spiral]].
+
+**[[Computability & Complexity]]** — the limits of computation: the
+[[Turing Machine]], the [[Halting Problem]], [[Big-O Notation]], and [[P versus NP]].
 {{< /columns >}}
+
+{{< note kind="key" title="…and a world apart" >}}
+**[[Music Theory]]** — [[Pitch]], [[Interval]]s, [[Scale]]s, [[Chord]]s, the
+[[Circle of Fifths]] — is deliberately *not* wired into the science above. Open
+any music page and the sidebar narrows to just that world; everywhere else it
+vanishes. That is starbase reading the link graph: a subject with no bridges to
+the rest forms its own navigable island. Add a single link (say from
+[[Harmony]] to [[Harmonics]]) and the two worlds would merge automatically — use
+the search box up top to hop between them meanwhile.
+{{< /note >}}
 
 {{< note kind="tip" title="How to explore" >}}
 Follow the **links** between topics — every page suggests *Related topics* and

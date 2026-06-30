@@ -56,6 +56,8 @@ type NavNode struct {
 	Weight   int
 	Children []*NavNode
 	Active   bool
+	Open     bool // section is expanded (contains the active page)
+	Divider  bool // render a divider before this node (separates disjoint clusters)
 	RootRel  string
 }
 
@@ -150,7 +152,7 @@ func (r *Renderer) Page(t *model.Topic) ([]byte, []model.Diagnostic) {
 		ContentHTML: template.HTML(content),
 		Related:     r.relatedViews(t),
 		Backlinks:   r.backlinkViews(t),
-		Nav:         cloneNavFor(r.nav, t.Slug, rootRel(t.OutPath)),
+		Nav:         r.navFor(t.Slug, rootRel(t.OutPath)),
 	}
 	var buf bytes.Buffer
 	if err := r.layout.ExecuteTemplate(&buf, "page", data); err != nil {
@@ -180,7 +182,7 @@ func (r *Renderer) Listing(title, slug, outPath, intro string, cards []Card) ([]
 	data := pageData{
 		Site: r.site, Title: title, RootRel: rootRel(outPath),
 		ContentHTML: template.HTML(b.String()),
-		Nav:         cloneNavFor(r.nav, slug, rootRel(outPath)),
+		Nav:         r.navFor(slug, rootRel(outPath)),
 	}
 	var buf bytes.Buffer
 	if err := r.layout.ExecuteTemplate(&buf, "page", data); err != nil {
@@ -499,19 +501,77 @@ func sortNav(n *NavNode) {
 	}
 }
 
-func cloneNavFor(n *NavNode, curSlug, rootRel string) *NavNode {
+// navFor builds the per-page sidebar. A topic shows only its own connected
+// component (its reachable world); the home page — and any page outside the
+// graph — shows everything, with disjoint clusters separated by a divider. The
+// section containing the active page is expanded.
+func (r *Renderer) navFor(curSlug, rootRel string) *NavNode {
+	comp, known := r.graph.Components[curSlug]
+	showAll := !known || curSlug == graph.HubSlug
+	inComp := func(slug string) bool {
+		if showAll {
+			return true
+		}
+		c, ok := r.graph.Components[slug]
+		return ok && c == comp
+	}
+	root := pruneNav(r.nav, curSlug, rootRel, inComp)
+	if showAll && r.graph.ComponentCount() > 1 {
+		r.clusterOrder(root)
+	}
+	return root
+}
+
+func pruneNav(n *NavNode, curSlug, rootRel string, inComp func(string) bool) *NavNode {
 	c := &NavNode{
-		Title: n.Title, URL: n.URL, Slug: n.Slug, Weight: n.Weight,
-		Active: n.Slug != "" && n.Slug == curSlug, RootRel: rootRel,
+		Title: n.Title, URL: n.URL, Slug: n.Slug, Weight: n.Weight, RootRel: rootRel,
+		Active: n.Slug != "" && n.Slug == curSlug,
 	}
 	for _, ch := range n.Children {
-		cc := cloneNavFor(ch, curSlug, rootRel)
+		cc := pruneNav(ch, curSlug, rootRel, inComp)
+		keep := len(cc.Children) > 0 || (cc.Slug != "" && inComp(cc.Slug))
+		if !keep {
+			continue
+		}
 		if cc.Active {
-			c.Active = true // keep ancestor path highlighted
+			c.Active = true
 		}
 		c.Children = append(c.Children, cc)
 	}
+	if len(c.Children) > 0 && c.Slug != "" &&
+		(curSlug == c.Slug || strings.HasPrefix(curSlug, c.Slug+"/")) {
+		c.Open = true
+	}
 	return c
+}
+
+// clusterOrder (home page only) groups top-level sections by component, largest
+// cluster first, and marks a divider where one cluster ends and the next begins.
+func (r *Renderer) clusterOrder(root *NavNode) {
+	comp := func(n *NavNode) int {
+		if c, ok := r.graph.Components[n.Slug]; ok {
+			return c
+		}
+		return 1 << 30
+	}
+	sort.SliceStable(root.Children, func(i, j int) bool {
+		a, b := root.Children[i], root.Children[j]
+		if ca, cb := comp(a), comp(b); ca != cb {
+			return ca < cb
+		}
+		if a.Weight != b.Weight {
+			return a.Weight < b.Weight
+		}
+		return a.Title < b.Title
+	})
+	last := -1
+	for _, ch := range root.Children {
+		c := comp(ch)
+		if last != -1 && c != last {
+			ch.Divider = true
+		}
+		last = c
+	}
 }
 
 func isSectionIndex(t *model.Topic) bool {

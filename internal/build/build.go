@@ -9,6 +9,7 @@ package build
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -220,6 +221,10 @@ func Build(cfg Config) (Result, error) {
 		}
 	}
 
+	if err := writeSearchIndex(cfg, topics, bySlug); err != nil {
+		return res, err
+	}
+
 	res.Diagnostics = dedupeDiags(res.Diagnostics)
 	if err := c.Save(cfg.OutDir); err != nil {
 		return res, err
@@ -251,6 +256,19 @@ func fingerprint(cfg Config, t *model.Topic, g *graph.Graph, bySlug map[string]*
 			fmt.Fprintf(h, "B:%s|%s\n", dst.OutPath, dst.Title)
 		}
 	}
+	// The sidebar shows this page's connected component, so its membership
+	// (which sections/topics appear) is part of the rendered output.
+	comp := g.Component(t.Slug)
+	var members []string
+	for s, c := range g.Components {
+		if c == comp {
+			if dst, ok := bySlug[s]; ok {
+				members = append(members, dst.OutPath+"|"+dst.Title)
+			}
+		}
+	}
+	sort.Strings(members)
+	fmt.Fprintf(h, "C:%d:%s\n", comp, strings.Join(members, ";"))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -473,6 +491,41 @@ func staticVersion(cfg Config) string {
 	// Math source (CDN vs vendored, and KaTeX version) affects page output too.
 	fmt.Fprintf(h, "katex:%s:vendor=%v\n", vendor.KaTeXVersion, cfg.Vendor)
 	return hex.EncodeToString(h.Sum(nil))[:10]
+}
+
+// writeSearchIndex emits search.json: a flat list of every topic (title, url,
+// section, summary) so the sidebar's search box can find anything, across all
+// connected components.
+func writeSearchIndex(cfg Config, topics []*model.Topic, bySlug map[string]*model.Topic) error {
+	type entry struct {
+		T string `json:"t"`
+		U string `json:"u"`
+		S string `json:"s"`
+		D string `json:"d"`
+	}
+	list := make([]entry, 0, len(topics))
+	for _, t := range topics {
+		if t.Slug == graph.HubSlug {
+			continue
+		}
+		sec := ""
+		if dir := path.Dir(t.Slug); dir != "." {
+			if idx, ok := bySlug[dir]; ok {
+				sec = idx.Title
+			} else {
+				sec = humanizeSeg(path.Base(dir))
+			}
+		} else if strings.HasSuffix(t.OutPath, "/index.html") {
+			sec = t.Title // a section landing page
+		}
+		list = append(list, entry{T: t.Title, U: t.OutPath, S: sec, D: t.Summary})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].T < list[j].T })
+	b, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(cfg.OutDir, "search.json"), b, 0o644)
 }
 
 // writeStatic writes one asset under <out>/static/<name>, skipping it when the

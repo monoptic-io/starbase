@@ -11,11 +11,17 @@ import (
 )
 
 type Graph struct {
-	Out     map[string][]string  // slug -> outbound slugs (resolved, deduped, no self)
-	In      map[string][]string  // slug -> inbound slugs (backlinks)
-	Rank    map[string]float64   // PageRank authority in [0,1]
-	related map[string][]Related // cached top-N related per slug
+	Out        map[string][]string  // slug -> outbound slugs (resolved, deduped, no self)
+	In         map[string][]string  // slug -> inbound slugs (backlinks)
+	Rank       map[string]float64   // PageRank authority in [0,1]
+	related    map[string][]Related // cached top-N related per slug
+	Components map[string]int       // slug -> connected-component id (0 = largest)
+	compSize   map[int]int
 }
+
+// HubSlug is excluded from connectivity: the home page links to every section as
+// a directory, which would otherwise fuse all topics into one component.
+const HubSlug = "index"
 
 type Related struct {
 	Slug  string
@@ -49,8 +55,84 @@ func Build(topics []*model.Topic) *Graph {
 	}
 	g.pageRank()
 	g.computeRelated()
+	g.computeComponents()
 	return g
 }
+
+// computeComponents finds weakly-connected components (links treated as
+// undirected), ignoring edges incident to the home hub. Component ids are
+// assigned by size, largest first, so id 0 is the main cluster.
+func (g *Graph) computeComponents() {
+	parent := make(map[string]string, len(g.Out))
+	var find func(string) string
+	find = func(x string) string {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b string) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[ra] = rb
+		}
+	}
+	slugs := make([]string, 0, len(g.Out))
+	for s := range g.Out {
+		parent[s] = s
+		slugs = append(slugs, s)
+	}
+	sort.Strings(slugs)
+	for _, s := range slugs {
+		if s == HubSlug {
+			continue
+		}
+		for _, d := range g.Out[s] {
+			if d == HubSlug {
+				continue
+			}
+			union(s, d)
+		}
+	}
+	// Tally sizes per root, then rank roots by size (ties broken by slug).
+	size := map[string]int{}
+	for _, s := range slugs {
+		size[find(s)]++
+	}
+	roots := make([]string, 0, len(size))
+	for r := range size {
+		roots = append(roots, r)
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		if size[roots[i]] != size[roots[j]] {
+			return size[roots[i]] > size[roots[j]]
+		}
+		return roots[i] < roots[j]
+	})
+	id := map[string]int{}
+	for i, r := range roots {
+		id[r] = i
+	}
+	g.Components = make(map[string]int, len(slugs))
+	g.compSize = map[int]int{}
+	for _, s := range slugs {
+		c := id[find(s)]
+		g.Components[s] = c
+		g.compSize[c]++
+	}
+}
+
+// Component returns the connected-component id of a slug (-1 if unknown).
+func (g *Graph) Component(slug string) int {
+	if c, ok := g.Components[slug]; ok {
+		return c
+	}
+	return -1
+}
+
+// ComponentCount returns the number of connected components.
+func (g *Graph) ComponentCount() int { return len(g.compSize) }
 
 // Backlinks returns the slugs that link to the given topic.
 func (g *Graph) Backlinks(slug string) []string { return g.In[slug] }

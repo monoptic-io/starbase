@@ -16,7 +16,11 @@
   <aside class="sg-sidebar">
     <div class="sg-sidebar-head">
       <a class="sg-brand" href="{{ .RootRel }}index.html">{{ .Site.Title }}</a>
-      <input class="sg-filter" type="search" placeholder="Filter topics…" oninput="sgFilterNav(this.value)" aria-label="Filter topics">
+      <div class="sg-search">
+        <input class="sg-filter" type="search" placeholder="Search all topics…" autocomplete="off"
+               oninput="sgSearch(this.value)" onkeydown="sgSearchKey(event)" aria-label="Search all topics">
+        <div class="sg-search-results" id="sg-search-results" hidden></div>
+      </div>
     </div>
     <nav class="sg-nav">
       {{- template "navtree" .Nav }}
@@ -104,11 +108,19 @@
 {{- define "navtree" }}
 <ul>
   {{- range .Children }}
-  <li class="{{ if .Children }}sg-nav-section{{ end }}{{ if .Active }} sg-active{{ end }}" data-name="{{ .Title | lower }}">
-    {{- if .URL }}<a href="{{ $.RootRel }}{{ .URL }}"{{ if .Active }} aria-current="page"{{ end }}>{{ .Title }}</a>
-    {{- else }}<span class="sg-nav-group">{{ .Title }}</span>{{ end }}
-    {{- if .Children }}{{ template "navtree" . }}{{ end }}
+  {{- if .Divider }}<li class="sg-nav-divider" aria-hidden="true"></li>{{ end }}
+  {{- if .Children }}
+  <li class="sg-nav-section{{ if .Active }} sg-active{{ end }}" data-name="{{ .Title | lower }}">
+    <details{{ if .Open }} open{{ end }}>
+      <summary class="sg-nav-summary">{{ if .URL }}<a href="{{ $.RootRel }}{{ .URL }}">{{ .Title }}</a>{{ else }}<span>{{ .Title }}</span>{{ end }}</summary>
+      {{- template "navtree" . }}
+    </details>
   </li>
+  {{- else }}
+  <li class="{{ if .Active }}sg-active{{ end }}" data-name="{{ .Title | lower }}">
+    <a href="{{ $.RootRel }}{{ .URL }}"{{ if .Active }} aria-current="page"{{ end }}>{{ .Title }}</a>
+  </li>
+  {{- end }}
   {{- end }}
 </ul>
 {{- end }}
