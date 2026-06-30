@@ -257,8 +257,8 @@ func compareClaim(info claim.Info, ck evidence.Check) string {
 		return fmt.Sprintf("claim check %q ran, but the claim embeds nothing to verify against it — add a result block or value=", info.Check)
 	}
 	if result != "" && normalizeText(ck.Output) != normalizeText(result) {
-		return fmt.Sprintf("claim check %q: the article's result does not match the computation\n           article:  %s\n           computed: %s",
-			info.Check, oneLine(result), oneLine(ck.Output))
+		return fmt.Sprintf("claim check %q: the article's result does not match the computation\n%s",
+			info.Check, firstDiff(result, ck.Output))
 	}
 	if value != "" && !valueInText(value, ck.Output) {
 		return fmt.Sprintf("claim check %q: the asserted value %q does not appear in the computation: %s",
@@ -274,6 +274,36 @@ func compareClaim(info claim.Info, ck evidence.Check) string {
 func valueInText(value, text string) bool {
 	nv, nt := normWords(value), normWords(text)
 	return nv != "" && strings.Contains(" "+nt+" ", " "+nv+" ")
+}
+
+// firstDiff returns the first line where the embedded result and the computed
+// output diverge, with spaces made visible (·) when the only difference is
+// whitespace — the common trap with hand-padded result tables.
+func firstDiff(expected, actual string) string {
+	el := strings.Split(normalizeText(expected), "\n")
+	al := strings.Split(normalizeText(actual), "\n")
+	n := len(el)
+	if len(al) > n {
+		n = len(al)
+	}
+	for i := 0; i < n; i++ {
+		e, a := lineAt(el, i), lineAt(al, i)
+		if e == a {
+			continue
+		}
+		if strings.Join(strings.Fields(e), " ") == strings.Join(strings.Fields(a), " ") {
+			e, a = strings.ReplaceAll(e, " ", "·"), strings.ReplaceAll(a, " ", "·") // whitespace-only
+		}
+		return fmt.Sprintf("           line %d  article:  %s\n                   computed: %s", i+1, e, a)
+	}
+	return fmt.Sprintf("           article:  %s\n           computed: %s", oneLine(expected), oneLine(actual))
+}
+
+func lineAt(lines []string, i int) string {
+	if i < len(lines) {
+		return lines[i]
+	}
+	return "(missing)"
 }
 
 func normWords(s string) string {

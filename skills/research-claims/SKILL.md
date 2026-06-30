@@ -46,14 +46,30 @@ awk -F, 'NR>1 && $2=="Midwest"{n++} END{print n+0}' sales.csv
 - A fence tagged `result` / `csv` / `tsv` / `table` is the **captured result** —
   the text `verify` compares against the check's stdout (see below).
 - Args: `check` (the `evidence/` directory that recomputes and verifies this);
-  `value` (the asserted headline value); `source` (the dataset/file); `asof`.
+  `value` (the asserted headline value); `source` (provenance); `asof` (when you
+  ran it). Only `check` and the check's `inputs` manifest are load-bearing —
+  **`source` is free-form provenance** shown to the reader (a dataset name,
+  notebook, or URL). It is *not* the input list, and is never used for staging or
+  verification.
 - **`value` is verified, not decorative.** With a `check`, `verify` enforces
   *both*: the `result` block (if present) must match the check's stdout exactly,
   **and** `value` (if present) must appear as a whole word in that stdout. So an
   honest result block can't launder a fabricated headline — change the bolded
   number and the build fails. Matching ignores whitespace/punctuation:
   `value="maxdev 1.7%"` matches output `maxdev=1.7%` and `value="29.1%"` matches
-  `(29.1%)`, but `value="4"` does *not* match `42`. Pick a distinctive token.
+  `(29.1%)`, but `value="4"` does *not* match `42`. Pick a distinctive token, and
+  note its **precision is a verification decision**: assert it at a rounding where
+  the computation actually lands (four datasets sharing a correlation only to two
+  decimals → the verified value is `0.82`, not the textbook `0.816`).
+- A claim may assert **just a `value`, with no result block** — the scalar path,
+  for when there's nothing tabular to show. `verify` runs the check and confirms
+  `value` appears in its stdout:
+
+  ```markdown
+  {{< claim value="0.82" check="anscombe-correlation" >}}
+  All four datasets share a Pearson correlation of **0.82**.
+  {{< /claim >}}
+  ```
 
 ## Verifiable claims (don't make the reader trust you)
 
@@ -82,7 +98,9 @@ evidence/midwest-regions/run           # chmod +x — needs a #! line
 Each input is resolved by a **provider** (file or http) and staged into a fresh
 **per-check** working directory under its basename; `verify` runs `./run` **there**,
 so it reads inputs by name (`sales.csv`) and sees nothing else — two checks
-declaring the same file never collide. It compares `run`'s **stdout against the
+declaring the same file never collide. **The manifest path only resolves the file;
+your script `open()`s the basename** (`sales.csv`, not `data/sales.csv`) — or the
+`-> rename` target. It compares `run`'s **stdout against the
 result the claim embeds** — its result block if it has one, else its `value`. The
 comparison is **exact text**, not numeric: `11.4M` does *not* match `11400000`, so
 make both sides agree. The only leniency is whitespace: a trailing newline and
