@@ -21,19 +21,26 @@ func TestDiscoverFuncs(t *testing.T) {
 	write(t, gf, `package x
 func MidwestRegions() (int, error) { return 4, nil }
 func RevenueTable() [][]string { return nil }
+func Stamp() (string, error) { return "v1", nil }
 func Helper() {}
 func priv() int { return 0 }
 func WithArg(n int) int { return n }
 type T struct{}
 func (T) Method() int { return 0 }
 `)
-	funcs := discoverFuncs([]string{gf})
+	funcs, hasStamp, stampResults := discoverFuncs([]string{gf})
 	got := map[string]int{}
 	for _, f := range funcs {
 		got[f.Name] = f.Results
 	}
 	if len(got) != 2 || got["midwest-regions"] != 2 || got["revenue-table"] != 1 {
 		t.Fatalf("expected two checks (midwest-regions:2, revenue-table:1), got %+v", got)
+	}
+	if !hasStamp || stampResults != 2 {
+		t.Fatalf("Stamp() should be detected as freshness (results 2), got hasStamp=%v results=%d", hasStamp, stampResults)
+	}
+	if _, ok := got["stamp"]; ok {
+		t.Fatal("Stamp() must not be registered as a check")
 	}
 }
 

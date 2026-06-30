@@ -68,63 +68,83 @@ type fn struct {
 }
 
 type pkg struct {
-	ImportPath string
-	Dir        string
-	RelName    string // path relative to evidence/, for display
-	GoFiles    []string
-	funcs      []fn
-	key        string
+	ImportPath   string
+	Dir          string
+	RelName      string // path relative to evidence/, for display
+	GoFiles      []string
+	funcs        []fn
+	hasStamp     bool // exports func Stamp() — a dynamic freshness fingerprint
+	stampResults int  // 1 (string) or 2 (string, error)
+	staticKey    string
+}
+
+// producedUnit is what the generated runner reports back for one package.
+type producedUnit struct {
+	Ran    bool             `json:"ran"`
+	Stamp  string           `json:"stamp"`
+	Checks map[string]Check `json:"checks"`
 }
 
 // Run resolves every evidence package, reusing cached results whose inputs are
 // unchanged and re-running the rest. The bool reports whether evidence exists.
+//
+// A package is re-run when its source or declared //starbase:deps changed (the
+// "static key", computed without running anything), or — for packages that
+// export a Stamp() — when their stamp differs from the cached one. Packages with
+// a Stamp() are always compiled and their cheap Stamp() called; only those whose
+// stamp (or static key) moved pay for the expensive check.
 func Run(contentDir string, force bool) (Result, bool, error) {
 	evDir := filepath.Join(contentDir, "evidence")
 	if fi, err := os.Stat(evDir); err != nil || !fi.IsDir() {
 		return Result{}, false, nil
 	}
-	pkgs, modPath, err := listPackages(evDir)
+	pkgs, _, err := listPackages(evDir)
 	if err != nil {
 		return Result{}, true, err
 	}
 
 	cache := loadCache(contentDir)
 	res := Result{Checks: map[string]Check{}}
-	var toRun []*pkg
+	var toRun []*pkg // packages the runner must touch (stale, or carry a Stamp)
+
+	emitCached := func(p *pkg) {
+		res.Units = append(res.Units, Unit{Name: p.RelName, Cached: true})
+		for n, ck := range cache[p.ImportPath].Checks {
+			res.Checks[n] = ck
+		}
+	}
 
 	for i := range pkgs {
 		p := &pkgs[i]
 		if len(p.funcs) == 0 {
 			continue // not an evidence package
 		}
-		p.key = unitKey(p, contentDir)
-		if !force {
-			if c, ok := cache[p.ImportPath]; ok && c.Key == p.key {
-				res.Units = append(res.Units, Unit{Name: p.RelName, Cached: true})
-				for n, ck := range c.Checks {
-					res.Checks[n] = ck
-				}
-				continue
-			}
+		p.staticKey = unitKey(p, contentDir)
+		c, ok := cache[p.ImportPath]
+		staticFresh := ok && c.StaticKey == p.staticKey
+		if !force && staticFresh && !p.hasStamp {
+			emitCached(p) // nothing to compile or run
+			continue
 		}
 		toRun = append(toRun, p)
 	}
 
 	if len(toRun) > 0 {
-		produced, runErr := runGenerated(evDir, contentDir, modPath, toRun)
+		produced, runErr := runGenerated(evDir, contentDir, toRun, cache, force)
 		for _, p := range toRun {
 			if runErr != "" {
 				res.Units = append(res.Units, Unit{Name: p.RelName, Err: runErr})
 				continue
 			}
-			pkgChecks := map[string]Check{}
-			for _, f := range p.funcs {
-				if ck, ok := produced[f.Name]; ok {
-					pkgChecks[f.Name] = ck
-					res.Checks[f.Name] = ck
-				}
+			pu := produced[p.ImportPath]
+			if !pu.Ran {
+				emitCached(p) // Stamp() matched: reuse cached results
+				continue
 			}
-			cache[p.ImportPath] = cachedUnit{Key: p.key, Checks: pkgChecks}
+			cache[p.ImportPath] = cachedUnit{StaticKey: p.staticKey, Stamp: pu.Stamp, Checks: pu.Checks}
+			for n, ck := range pu.Checks {
+				res.Checks[n] = ck
+			}
 			res.Units = append(res.Units, Unit{Name: p.RelName})
 		}
 	}
@@ -133,6 +153,10 @@ func Run(contentDir string, force bool) (Result, bool, error) {
 }
 
 // --- package + function discovery ---
+
+// stampFunc is the reserved function name a package exports to declare a dynamic
+// freshness fingerprint. It is not a check.
+const stampFunc = "Stamp"
 
 func listPackages(evDir string) ([]pkg, string, error) {
 	cmd := exec.Command("go", "list", "-json", "./...")
@@ -168,14 +192,13 @@ func listPackages(evDir string) ([]pkg, string, error) {
 		for _, g := range l.GoFiles {
 			p.GoFiles = append(p.GoFiles, filepath.Join(l.Dir, g))
 		}
-		p.funcs = discoverFuncs(p.GoFiles)
+		p.funcs, p.hasStamp, p.stampResults = discoverFuncs(p.GoFiles)
 		pkgs = append(pkgs, p)
 	}
 	return pkgs, modPath, nil
 }
 
-func discoverFuncs(goFiles []string) []fn {
-	var out []fn
+func discoverFuncs(goFiles []string) (funcs []fn, hasStamp bool, stampResults int) {
 	fset := token.NewFileSet()
 	for _, gf := range goFiles {
 		f, err := parser.ParseFile(fset, gf, nil, 0)
@@ -191,13 +214,18 @@ func discoverFuncs(goFiles []string) []fn {
 				continue
 			}
 			n := results(fd.Type)
-			if n == 1 || n == 2 {
-				out = append(out, fn{GoName: fd.Name.Name, Name: kebab(fd.Name.Name), Results: n})
+			if n != 1 && n != 2 {
+				continue
 			}
+			if fd.Name.Name == stampFunc {
+				hasStamp, stampResults = true, n
+				continue // freshness fingerprint, not a check
+			}
+			funcs = append(funcs, fn{GoName: fd.Name.Name, Name: kebab(fd.Name.Name), Results: n})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].GoName < out[j].GoName })
-	return out
+	sort.Slice(funcs, func(i, j int) bool { return funcs[i].GoName < funcs[j].GoName })
+	return funcs, hasStamp, stampResults
 }
 
 // results returns the count if the signature is a check: (T) or (T, error).
@@ -233,7 +261,7 @@ func results(t *ast.FuncType) int {
 
 // --- generated runner ---
 
-func runGenerated(evDir, contentDir, modPath string, pkgs []*pkg) (map[string]Check, string) {
+func runGenerated(evDir, contentDir string, pkgs []*pkg, cache map[string]cachedUnit, force bool) (map[string]producedUnit, string) {
 	absRoot, _ := filepath.Abs(contentDir)
 	genDir := filepath.Join(evDir, ".sbgen")
 	_ = os.RemoveAll(genDir)
@@ -242,24 +270,44 @@ func runGenerated(evDir, contentDir, modPath string, pkgs []*pkg) (map[string]Ch
 	}
 	defer os.RemoveAll(genDir)
 
-	var imports, calls strings.Builder
+	var imports, body strings.Builder
 	for i, p := range pkgs {
 		alias := fmt.Sprintf("p%d", i)
 		fmt.Fprintf(&imports, "\t%s %q\n", alias, p.ImportPath)
-		for _, f := range p.funcs {
-			if f.Results == 2 {
-				fmt.Fprintf(&calls, "\t{ v, err := %s.%s(); emit(%q, v, err) }\n", alias, f.GoName, f.Name)
+
+		// A package re-runs its checks if its static inputs moved or (when it has
+		// a Stamp) its stamp differs from the cached one.
+		alwaysRun := force || cache[p.ImportPath].StaticKey != p.staticKey
+
+		fmt.Fprintf(&body, "\tfunc() {\n\t\tu := unit{}\n")
+		if p.hasStamp {
+			if p.stampResults == 2 {
+				fmt.Fprintf(&body, "\t\tif s, err := %s.Stamp(); err != nil { u.Stamp = \"stamp error: \" + err.Error(); u.Ran = true } else { u.Stamp = s }\n", alias)
 			} else {
-				fmt.Fprintf(&calls, "\t{ v := %s.%s(); emit(%q, v, nil) }\n", alias, f.GoName, f.Name)
+				fmt.Fprintf(&body, "\t\tu.Stamp = %s.Stamp()\n", alias)
 			}
 		}
+		if alwaysRun {
+			fmt.Fprintf(&body, "\t\tu.Ran = true\n")
+		} else if p.hasStamp {
+			fmt.Fprintf(&body, "\t\tif u.Stamp != %q { u.Ran = true }\n", cache[p.ImportPath].Stamp)
+		}
+		fmt.Fprintf(&body, "\t\tif u.Ran {\n\t\t\tm := map[string]check{}\n")
+		for _, f := range p.funcs {
+			if f.Results == 2 {
+				fmt.Fprintf(&body, "\t\t\t{ v, err := %s.%s(); emit(m, %q, v, err) }\n", alias, f.GoName, f.Name)
+			} else {
+				fmt.Fprintf(&body, "\t\t\t{ v := %s.%s(); emit(m, %q, v, nil) }\n", alias, f.GoName, f.Name)
+			}
+		}
+		fmt.Fprintf(&body, "\t\t\tu.Checks = m\n\t\t}\n\t\tunits[%q] = u\n\t}()\n", p.ImportPath)
 	}
 	// Evidence runs with the knowledge-base root as its working directory, so
 	// functions reference data relative to the KB (e.g. "data/sales.csv").
 	chdir := fmt.Sprintf("\tif err := os.Chdir(%q); err != nil { panic(err) }\n", absRoot)
 	src := "package main\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"reflect\"\n" +
-		imports.String() + ")\n\n" + runnerBody + "\nfunc main() {\n" + chdir + calls.String() +
-		"\tjson.NewEncoder(os.Stdout).Encode(out)\n}\n"
+		imports.String() + ")\n\n" + runnerBody + "\nfunc main() {\n" + chdir + body.String() +
+		"\tjson.NewEncoder(os.Stdout).Encode(units)\n}\n"
 	if err := os.WriteFile(filepath.Join(genDir, "main.go"), []byte(src), 0o644); err != nil {
 		return nil, err.Error()
 	}
@@ -277,7 +325,7 @@ func runGenerated(evDir, contentDir, modPath string, pkgs []*pkg) (map[string]Ch
 		}
 		return nil, msg
 	}
-	var out map[string]Check
+	var out map[string]producedUnit
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &out); err != nil {
 		return nil, "evidence runner produced invalid output: " + err.Error()
 	}
@@ -289,8 +337,13 @@ const runnerBody = `type check struct {
 	Table [][]string ` + "`json:\"table,omitempty\"`" + `
 	Error string     ` + "`json:\"error,omitempty\"`" + `
 }
-var out = map[string]check{}
-func emit(name string, v interface{}, err error) {
+type unit struct {
+	Ran    bool             ` + "`json:\"ran\"`" + `
+	Stamp  string           ` + "`json:\"stamp\"`" + `
+	Checks map[string]check ` + "`json:\"checks,omitempty\"`" + `
+}
+var units = map[string]unit{}
+func emit(m map[string]check, name string, v interface{}, err error) {
 	c := check{}
 	if err != nil {
 		c.Error = err.Error()
@@ -312,7 +365,7 @@ func emit(name string, v interface{}, err error) {
 			c.Value = fmt.Sprintf("%v", v)
 		}
 	}
-	out[name] = c
+	m[name] = c
 }
 func deref(v reflect.Value) reflect.Value {
 	if v.Kind() == reflect.Interface {
@@ -385,8 +438,9 @@ func kebab(s string) string {
 // --- persisted cache (user cache dir; CI starts cold) ---
 
 type cachedUnit struct {
-	Key    string           `json:"key"`
-	Checks map[string]Check `json:"checks"`
+	StaticKey string           `json:"static_key"` // hash of Go sources + //starbase:deps
+	Stamp     string           `json:"stamp,omitempty"`
+	Checks    map[string]Check `json:"checks"`
 }
 
 func cachePath(contentDir string) string {

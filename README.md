@@ -110,10 +110,12 @@ anything — pure Go, or shell out to DuckDB, a SQL driver, an API.
 Verification is **incremental like `go test`**: each evidence package's results
 are cached keyed by a hash of its Go sources plus the data files it declares
 (`//starbase:deps`), so a minutes-long simulation re-runs only when its own code
-or data changes — never when you edit an unrelated page. The cache is a local
-convenience; CI starts cold and is authoritative. Claims sort into **unsupported
-→ attested → verified**. See `examples/sales-research/` and the `research-claims`
-skill.
+or data changes — never when you edit an unrelated page. For inputs a static file
+list can't name (a URL, a database, a clock), a package can export a cheap
+`func Stamp() (string, error)` — a dynamic fingerprint that drives re-runs the
+same way. The cache is a local convenience; CI starts cold and is authoritative.
+Claims sort into **unsupported → attested → verified**. See
+`examples/sales-research/` and the `research-claims` skill.
 
 ## Third-party assets & offline builds
 

@@ -103,6 +103,34 @@ starbase verify <dir>          # re-runs only changed packages; diffs every chec
 starbase verify <dir> -force   # ignore the cache and re-run everything
 ```
 
+### Inputs `//starbase:deps` can't name: export a `Stamp()`
+
+`//starbase:deps` only hashes files. When a check's real input isn't a static
+file — a URL, a database, a clock — declare a **dynamic fingerprint** instead: an
+exported `Stamp()` returning a cheap string that changes whenever the input does.
+
+```go
+// Stamp is cheap; the expensive work lives in the check below.
+func Stamp() (string, error) {
+    return httpEtag("https://api.example.com/feed")   // or: SELECT max(updated_at)
+}
+
+func Reading() (string, error) { ...expensive recompute... }
+```
+
+starbase always compiles the package and calls `Stamp()` (so keep it cheap), but
+runs the expensive check only when the stamp — or the package's source — changes.
+Rules of thumb:
+
+- return a fingerprint of every external input (etag, content hash, row version);
+- return a **constant** to mean "only re-run when my code changes";
+- return an **always-different** value to mean "never cache — always re-run."
+
+`Stamp()` doesn't make the cache *sound* — you can still miss an input, exactly
+as you can forget a `deps` line — but it makes non-file inputs *expressible*. CI's
+cold run remains the backstop. Note a stamp tracks the whole package, so keep one
+expensive check per package.
+
 Wire `verify` into CI. A claim with a `check` that re-executes and matches is
 **verified**; one with only a pasted result is **attested**; one with neither is
 **unsupported**. Aim to make load-bearing numbers verified.
