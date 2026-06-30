@@ -528,10 +528,107 @@
         step: function () {},
       };
     },
+    wave: function (c) {
+      var type = (c.type || "traveling"), n = num(c.harmonic, num(c.n, 3)),
+        speed = num(c.speed, 1), amp = num(c.amplitude, 0.7), showNodes = (c.nodes !== "false");
+      return {
+        step: function () {},
+        draw: function (ctx, W, H, env) {
+          var t = env.t, pad = 24, midY = H / 2, A = amp * (H / 2 - pad);
+          var yof = function (x) {
+            return type === "standing"
+              ? Math.sin(n * Math.PI * x) * Math.cos(2 * Math.PI * speed * t) * A
+              : Math.sin(2 * Math.PI * (n * x - speed * t)) * A;
+          };
+          ctx.strokeStyle = css("--border"); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(pad, midY); ctx.lineTo(W - pad, midY); ctx.stroke();
+          if (type === "standing") {
+            ctx.strokeStyle = css("--text-faint"); ctx.globalAlpha = 0.5; ctx.setLineDash([3, 3]);
+            for (var s = -1; s <= 1; s += 2) {
+              ctx.beginPath();
+              for (var px = pad; px <= W - pad; px++) {
+                var xx = (px - pad) / (W - 2 * pad), Y = midY - s * Math.abs(Math.sin(n * Math.PI * xx)) * A;
+                px === pad ? ctx.moveTo(px, Y) : ctx.lineTo(px, Y);
+              }
+              ctx.stroke();
+            }
+            ctx.setLineDash([]); ctx.globalAlpha = 1;
+          }
+          ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2.5; ctx.beginPath();
+          for (var p = pad; p <= W - pad; p++) {
+            var x2 = (p - pad) / (W - 2 * pad), Y2 = midY - yof(x2);
+            p === pad ? ctx.moveTo(p, Y2) : ctx.lineTo(p, Y2);
+          }
+          ctx.stroke();
+          if (type === "standing" && showNodes) {
+            ctx.fillStyle = css("--warn");
+            for (var k = 0; k <= n; k++) {
+              var nx = pad + (k / n) * (W - 2 * pad);
+              ctx.beginPath(); ctx.arc(nx, midY, 3, 0, 7); ctx.fill();
+            }
+          }
+        },
+      };
+    },
+    interference: function (c) {
+      var sep = num(c.separation, 0.34), wl = num(c.wavelength, 30), speed = num(c.speed, 2.4), cell = num(c.cell, 6);
+      return {
+        step: function () {},
+        draw: function (ctx, W, H, env) {
+          var t = env.t, m = env.mouse;
+          var s = (m && m.x > 0) ? Math.max(0.08, Math.min(0.7, m.x / W)) : sep;
+          var s1x = W * (0.5 - s / 2), s2x = W * (0.5 + s / 2), sy = H / 2, k = 2 * Math.PI / wl;
+          var pos = rgb(css("--accent")), neg = rgb(css("--accent-2"));
+          for (var y = 0; y < H; y += cell) for (var x = 0; x < W; x += cell) {
+            var r1 = Math.hypot(x - s1x, y - sy), r2 = Math.hypot(x - s2x, y - sy);
+            var v = Math.cos(k * r1 - speed * t) / (1 + r1 * 0.03) + Math.cos(k * r2 - speed * t) / (1 + r2 * 0.03);
+            var a = Math.max(-1, Math.min(1, v)), col = a >= 0 ? pos : neg;
+            ctx.fillStyle = "rgba(" + col[0] + "," + col[1] + "," + col[2] + "," + (Math.abs(a) * 0.85).toFixed(3) + ")";
+            ctx.fillRect(x, y, cell, cell);
+          }
+          ctx.fillStyle = css("--warn");
+          ctx.beginPath(); ctx.arc(s1x, sy, 4, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(s2x, sy, 4, 0, 7); ctx.fill();
+        },
+      };
+    },
+    wavepacket: function (c) {
+      var groupv = num(c.groupv, 60), phasev = num(c.phasev, 160), k = num(c.k, 0.1), width = num(c.width, 70);
+      return {
+        step: function () {},
+        draw: function (ctx, W, H, env) {
+          var t = env.t, midY = H / 2, A = H * 0.32, span = W * 1.4,
+            center = (W * 0.1 + groupv * t) % span, omega = phasev * k;
+          ctx.strokeStyle = css("--text-faint"); ctx.globalAlpha = 0.6; ctx.setLineDash([4, 4]);
+          for (var s = -1; s <= 1; s += 2) {
+            ctx.beginPath();
+            for (var px = 0; px < W; px++) {
+              var e = Math.exp(-Math.pow((px - center) / width, 2)), Y = midY - s * e * A;
+              px === 0 ? ctx.moveTo(px, Y) : ctx.lineTo(px, Y);
+            }
+            ctx.stroke();
+          }
+          ctx.setLineDash([]); ctx.globalAlpha = 1;
+          ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.beginPath();
+          for (var p = 0; p < W; p++) {
+            var e2 = Math.exp(-Math.pow((p - center) / width, 2)), Y2 = midY - e2 * Math.cos(k * p - omega * t) * A;
+            p === 0 ? ctx.moveTo(p, Y2) : ctx.lineTo(p, Y2);
+          }
+          ctx.stroke();
+        },
+      };
+    },
   };
 
   /* ---------------- helpers ---------------- */
   function compile(src) { try { return new Function("x", "y", "with (Math) { return (" + src + "); }"); } catch (e) { return function () { return 0; }; } }
   function num(v, d) { var n = parseFloat(v); return isNaN(n) ? (d === undefined ? 0 : d) : n; }
+  function rgb(s) {
+    s = (s || "").trim();
+    if (/^#[0-9a-f]{3}$/i.test(s)) return [s[1] + s[1], s[2] + s[2], s[3] + s[3]].map(function (h) { return parseInt(h, 16); });
+    if (/^#[0-9a-f]{6}$/i.test(s)) return [s.substr(1, 2), s.substr(3, 2), s.substr(5, 2)].map(function (h) { return parseInt(h, 16); });
+    var m = s.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+    return m ? [+m[1], +m[2], +m[3]] : [120, 140, 200];
+  }
   function fmt(v) { return Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.01) ? v.toExponential(1) : (Math.round(v * 100) / 100).toString(); }
 })();

@@ -221,7 +221,7 @@ func (r *Renderer) renderBody(t *model.Topic, body string, depth int) (string, m
 		for i, sc := range parse.ScanShortcodes(body) {
 			id := fmt.Sprintf("sg-%s-%d-%d", sanitizeID(t.Slug), depth, i)
 			innerHTML := ""
-			if sc.Inner != "" {
+			if sc.Inner != "" && !r.eng.RawInner(sc.Name) {
 				ip, ir, _, id2 := r.renderBody(t, sc.Inner, depth+1)
 				innerHTML = substitute(ip, ir)
 				diags = append(diags, id2...)

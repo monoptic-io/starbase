@@ -75,10 +75,20 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
+	// Load templates first: the parser needs to know which templates have
+	// opaque (raw) inner blocks so it can skip them when scanning for links.
+	eng, engDiags, err := loadEngine(cfg)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	rawInner := eng.RawInnerNames()
+
 	var topics []*model.Topic
 	var diags []model.Diagnostic
+	diags = append(diags, engDiags...)
 	for _, rel := range files {
-		t, ds, err := parse.File(cfg.ContentDir, rel)
+		t, ds, err := parse.File(cfg.ContentDir, rel, rawInner)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -93,11 +103,6 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 	diags = append(diags, regDiags...)
 	diags = append(diags, reg.ResolveLinks(topics)...)
 
-	eng, engDiags, err := loadEngine(cfg)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	diags = append(diags, engDiags...)
 	for _, t := range topics {
 		for _, sc := range t.Shortcodes {
 			diags = append(diags, eng.Validate(sc, t.SourcePath)...)

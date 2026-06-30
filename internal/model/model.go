@@ -53,13 +53,15 @@ type Link struct {
 //	{{< chart type="line" height="320" >}}
 //	{{< sim name="pendulum" >}} ... inner ... {{< /sim >}}
 type Shortcode struct {
-	Name  string
-	Args  map[string]string
-	Inner string // block body, empty for self-closing form
-	Line  int
-	Start int // byte offset of the invocation in Body
-	End   int
-	Raw   string // exact source text, used for placeholder substitution
+	Name       string
+	Args       map[string]string
+	Inner      string // block body, empty for self-closing form
+	Line       int
+	Start      int // byte offset of the whole invocation in Body
+	End        int
+	InnerStart int // byte offset of the inner block in Body (0 if none)
+	InnerEnd   int
+	Raw        string // exact source text, used for placeholder substitution
 }
 
 // Diagnostic is a warning or error surfaced during build/check.

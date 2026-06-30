@@ -36,12 +36,13 @@ type Param struct {
 }
 
 type def struct {
-	Name   string
-	Params map[string]*Param
-	order  []string
-	Open   bool // allow undeclared args without warning
-	Doc    string
-	Hash   string
+	Name     string
+	Params   map[string]*Param
+	order    []string
+	Open     bool // allow undeclared args without warning
+	RawInner bool // inner block is opaque (JS/HTML/LaTeX), not markdown
+	Doc      string
+	Hash     string
 }
 
 type Engine struct {
@@ -68,6 +69,23 @@ func (e *Engine) Names() []string {
 
 // Has reports whether a template is registered.
 func (e *Engine) Has(name string) bool { _, ok := e.defs[name]; return ok }
+
+// RawInner reports whether a template's inner block is opaque (not markdown).
+func (e *Engine) RawInner(name string) bool {
+	d, ok := e.defs[name]
+	return ok && d.RawInner
+}
+
+// RawInnerNames returns the set of templates with opaque inner blocks.
+func (e *Engine) RawInnerNames() map[string]bool {
+	out := map[string]bool{}
+	for n, d := range e.defs {
+		if d.RawInner {
+			out[n] = true
+		}
+	}
+	return out
+}
 
 // Doc returns a template's documentation string.
 func (e *Engine) Doc(name string) string {
@@ -163,6 +181,10 @@ func parseDirectives(content string, d *def) {
 		case strings.HasPrefix(body, "@params"):
 			if strings.Contains(body, "open") {
 				d.Open = true
+			}
+		case strings.HasPrefix(body, "@inner"):
+			if strings.Contains(body, "raw") {
+				d.RawInner = true
 			}
 		case strings.HasPrefix(body, "@param"):
 			parseParam(strings.TrimSpace(body[len("@param"):]), d)

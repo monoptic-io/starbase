@@ -40,6 +40,10 @@ Separate multiple curves with `;;`.
 {{< sim name="nbody"           bodies="6" g="1" >}}
 {{< sim name="life"            cell="10" >}}
 {{< sim name="vectorfield"     fx="y" fy="-x" >}}
+{{< sim name="wave"            type="standing" harmonic="3" >}}
+{{< sim name="wave"            type="traveling" harmonic="2" speed="1" >}}
+{{< sim name="interference"    wavelength="30" separation="0.34" >}}
+{{< sim name="wavepacket"      groupv="60" phasev="160" >}}
 ```
 
 Each renders to an animated canvas with play/pause/reset controls. `name` is

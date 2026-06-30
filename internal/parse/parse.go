@@ -29,18 +29,20 @@ var (
 )
 
 // File reads and parses a single markdown file. root is the content root and
-// rel is the file's path relative to it (slash-separated).
-func File(root, rel string) (*model.Topic, []model.Diagnostic, error) {
+// rel is the file's path relative to it (slash-separated). rawInner names the
+// templates whose inner block is opaque (JS, raw HTML, LaTeX) and must not be
+// scanned for wiki links.
+func File(root, rel string, rawInner map[string]bool) (*model.Topic, []model.Diagnostic, error) {
 	abs := path.Join(root, rel)
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return nil, nil, err
 	}
-	return Bytes(rel, raw)
+	return Bytes(rel, raw, rawInner)
 }
 
 // Bytes parses already-read file content. Exposed for testing and caching.
-func Bytes(rel string, raw []byte) (*model.Topic, []model.Diagnostic, error) {
+func Bytes(rel string, raw []byte, rawInner map[string]bool) (*model.Topic, []model.Diagnostic, error) {
 	sum := sha256.Sum256(raw)
 	t := &model.Topic{
 		SourcePath:  rel,
@@ -80,8 +82,18 @@ func Bytes(rel string, raw []byte) (*model.Topic, []model.Diagnostic, error) {
 		t.Summary = firstParagraph(masked, body)
 	}
 
-	t.Links = extractLinks(masked, body, rel)
 	t.Shortcodes = extractShortcodes(masked, body)
+
+	// For link scanning, blank out the inner of raw-inner templates (sketch JS,
+	// embedded HTML, LaTeX) so bracket pairs in code aren't mistaken for links.
+	maskedForLinks := masked
+	for _, sc := range t.Shortcodes {
+		if rawInner[sc.Name] && sc.InnerEnd > sc.InnerStart {
+			maskedForLinks = maskedForLinks[:sc.InnerStart] +
+				blank(maskedForLinks[sc.InnerStart:sc.InnerEnd]) + maskedForLinks[sc.InnerEnd:]
+		}
+	}
+	t.Links = extractLinks(maskedForLinks, body, rel)
 	t.WordCount = len(strings.Fields(stripMarkup(masked)))
 
 	return t, diags, nil
@@ -131,10 +143,16 @@ func extractShortcodes(masked, orig string) []model.Shortcode {
 	var stack []openTag
 	var codes []model.Shortcode
 
-	mk := func(name string, argS, argE, start, end int, inner string) model.Shortcode {
+	// innerS/innerE delimit a paired shortcode's inner block (0,0 for self-closing).
+	mk := func(name string, argS, argE, start, end, innerS, innerE int) model.Shortcode {
+		inner := ""
+		if innerE > innerS {
+			inner = orig[innerS:innerE]
+		}
 		return model.Shortcode{
 			Name: name, Args: parseArgs(orig[argS:argE]), Inner: inner,
-			Line: lineOf(masked, start), Start: start, End: end, Raw: orig[start:end],
+			Line: lineOf(masked, start), Start: start, End: end,
+			InnerStart: innerS, InnerEnd: innerE, Raw: orig[start:end],
 		}
 	}
 
@@ -159,19 +177,19 @@ func extractShortcodes(masked, orig string) []model.Shortcode {
 			}
 			for i := idx + 1; i < len(stack); i++ { // unclosed inner opens
 				o := stack[i]
-				codes = append(codes, mk(o.name, o.argStart, o.argEnd, o.tagStart, o.tagEnd, ""))
+				codes = append(codes, mk(o.name, o.argStart, o.argEnd, o.tagStart, o.tagEnd, 0, 0))
 			}
 			o := stack[idx]
-			codes = append(codes, mk(o.name, o.argStart, o.argEnd, o.tagStart, end, orig[o.tagEnd:start]))
+			codes = append(codes, mk(o.name, o.argStart, o.argEnd, o.tagStart, end, o.tagEnd, start))
 			stack = stack[:idx]
 		case isSelf:
-			codes = append(codes, mk(name, argS, argE, start, end, ""))
+			codes = append(codes, mk(name, argS, argE, start, end, 0, 0))
 		default:
 			stack = append(stack, openTag{name, argS, argE, start, end})
 		}
 	}
 	for _, o := range stack { // opens with no close are self-closing
-		codes = append(codes, mk(o.name, o.argStart, o.argEnd, o.tagStart, o.tagEnd, ""))
+		codes = append(codes, mk(o.name, o.argStart, o.argEnd, o.tagStart, o.tagEnd, 0, 0))
 	}
 	sort.Slice(codes, func(i, j int) bool { return codes[i].Start < codes[j].Start })
 	return codes

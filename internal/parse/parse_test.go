@@ -70,9 +70,33 @@ func TestMaskCodeFence(t *testing.T) {
 	}
 }
 
+func TestRawInnerSkipsLinkScanning(t *testing.T) {
+	body := []byte("---\ntitle: T\n---\n" +
+		"Prose [[Real Link]].\n\n" +
+		"{{< sketch >}}\nvar a = [[0, s]];\nif (x) m = [[1, 2], [3, 4]];\n{{< /sketch >}}\n\n" +
+		"{{< note >}}\nInner [[Note Link]].\n{{< /note >}}\n")
+	topic, _, err := Bytes("t.md", body, map[string]bool{"sketch": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, l := range topic.Links {
+		got[l.Target] = true
+	}
+	if !got["Real Link"] {
+		t.Error("top-level link should be found")
+	}
+	if !got["Note Link"] {
+		t.Error("link inside a prose (non-raw) shortcode should still be found")
+	}
+	if got["0, s"] || got["1, 2"] || len(topic.Links) != 2 {
+		t.Errorf("bracket pairs inside a raw sketch must be ignored; got links %v", topic.Links)
+	}
+}
+
 func TestFrontmatterAndSlug(t *testing.T) {
 	topic, _, err := Bytes("mechanics/Damped Pendulum.md",
-		[]byte("---\ntitle: Damped Pendulum\naliases: [damping, decay]\ntags: [a, b]\n---\n# Heading\nBody.\n"))
+		[]byte("---\ntitle: Damped Pendulum\naliases: [damping, decay]\ntags: [a, b]\n---\n# Heading\nBody.\n"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -62,7 +62,8 @@ Exit code is non-zero if there are errors (or, with `-strict`, warnings).
 ### Built-in templates
 
 `chart`, `plot`, `sim` (pendulum · doublependulum · lorenz · nbody · life ·
-vectorfield), `sketch`, `note`, `quiz`, `eq`, `figure`, `columns`, `embed`.
+vectorfield · wave · interference · wavepacket), `sketch`, `note`, `quiz`, `eq`,
+`figure`, `columns`, `embed`.
 
 ### Project overrides
 
@@ -127,5 +128,5 @@ It is published live at **https://monoptic-io.github.io/starbase/**. Build it
 locally with:
 
 ```sh
-starbase build demo -o demo/_site -title "Dynamical Systems"
+starbase build demo -o demo/_site -title "Systems, Signals & Computation"
 ```

@@ -1,20 +1,22 @@
 ---
-title: Dynamical Systems
-summary: An explorable field guide to how things change over time — from a swinging pendulum to deterministic chaos and emergent complexity.
+title: Systems, Signals & Computation
+summary: An interactive field guide to how things change, oscillate, propagate, and compute — from a swinging pendulum to chaos, waves, networks, and learning machines.
 tags: [overview]
 ---
 
-# Dynamical Systems
+# Systems, Signals & Computation
 
-A **dynamical system** is anything whose state evolves in time according to a
-fixed rule. That single idea — a *state* plus an *evolution rule* — is enough to
-describe a swinging [[Pendulum]], the weather, planetary orbits, populations of
-predators and prey, and the flicker of neurons. This knowledge base is a guided
-tour through the field, with live simulations you can poke on almost every page.
+An interactive field guide to the mathematics of change and pattern. It starts
+with **dynamical systems** — anything whose state evolves by a fixed rule, like a
+swinging [[Pendulum]] — and follows the threads outward: into the **oscillations**
+and **[[Waves]]** that motion makes, the **[[Fourier Analysis]]** that decomposes
+any signal, the **[[Chaos]]** that simple rules can hide, and the **networks**,
+**randomness**, **information**, and **optimization** that turn dynamics into
+computation. Almost every page has a live simulation you can poke.
 
 {{< sim name="lorenz" caption="The Lorenz attractor — a deterministic system that never repeats. Watch it trace out its butterfly." >}}
 
-## Six ways in
+## Ways in
 
 {{< columns count="2" >}}
 **[[Foundations]]** — the language of the field: [[State Space]],
@@ -36,6 +38,13 @@ the [[Fourier Transform]], [[Harmonics]], and the [[Uncertainty Principle]].
 **[[Complex Systems]]** — many simple parts, emergent wholes: the
 [[N-Body Problem]], [[Conway's Game of Life]], [[Predator–Prey Dynamics]], and
 [[Reaction–Diffusion]] patterns.
+
+**[[Linear Algebra]]** — the math under all of it: [[Vector]]s, [[Matrix|matrices]]
+as [[Linear Transformation]]s, and the [[Eigenvalues and Eigenvectors]] that decide
+[[Stability]] and rank the web.
+
+**[[Graph Theory & Networks]]** — nodes and edges everywhere: [[Breadth-First Search]],
+[[Dijkstra's Algorithm]], [[PageRank]], and [[Small-World Network]]s.
 {{< /columns >}}
 
 {{< note kind="tip" title="How to explore" >}}

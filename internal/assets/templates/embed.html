@@ -1,3 +1,4 @@
 {{/* @doc Inject raw, trusted HTML (via the `html` arg or the inner block). Use sparingly — content is not sanitized. */}}
+{{/* @inner raw */}}
 {{/* @param html default="" */}}
 {{ if .html }}{{ safeHTML .html }}{{ else }}{{ safeHTML .InnerRaw }}{{ end }}
