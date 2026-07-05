@@ -13,6 +13,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/monoptic-io/starbase/internal/claim"
@@ -47,7 +48,19 @@ type Renderer struct {
 	md     goldmark.Markdown
 	layout *template.Template
 	nav    *NavNode
+	checks map[string]CheckResult // evidence outputs, injected by {{< val >}} / {{< data >}}
 }
+
+// CheckResult is one evidence check's computed output, supplied to the renderer
+// so val/data shortcodes inject real values instead of the author transcribing
+// them. Err (a non-zero exit) turns any reference into a build error.
+type CheckResult struct {
+	Output string
+	Err    string
+}
+
+// SetChecks provides the evidence outputs the injection shortcodes read from.
+func (r *Renderer) SetChecks(m map[string]CheckResult) { r.checks = m }
 
 // NavNode is one entry in the sidebar navigation tree.
 type NavNode struct {
@@ -229,6 +242,18 @@ func (r *Renderer) renderBody(t *model.Topic, body string, depth int) (string, m
 				segs = append(segs, segment{sc.Start, sc.End, 3, out})
 				continue
 			}
+			if sc.Name == "val" {
+				out, ds := r.renderVal(t, sc)
+				diags = append(diags, ds...)
+				segs = append(segs, segment{sc.Start, sc.End, 3, out})
+				continue
+			}
+			if sc.Name == "data" {
+				out, ds := r.renderData(t, sc, page, id)
+				diags = append(diags, ds...)
+				segs = append(segs, segment{sc.Start, sc.End, 3, out})
+				continue
+			}
 			innerHTML := ""
 			if sc.Inner != "" && !r.eng.RawInner(sc.Name) {
 				ip, ir, _, id2 := r.renderBody(t, sc.Inner, depth+1)
@@ -326,7 +351,10 @@ func (r *Renderer) renderClaim(t *model.Topic, sc model.Shortcode, id string, de
 }
 
 func claimResultHTML(info claim.Info) string {
-	rows := claim.Rows(info.Result, info.ResultFmt)
+	return rowsTableHTML(claim.Rows(info.Result, info.ResultFmt))
+}
+
+func rowsTableHTML(rows [][]string) string {
 	if len(rows) == 0 {
 		return ""
 	}
@@ -348,6 +376,102 @@ func claimResultHTML(info claim.Info) string {
 	}
 	b.WriteString("</table>")
 	return b.String()
+}
+
+// renderVal injects a check's scalar stdout inline, so a number in prose comes
+// from the computation instead of being transcribed by the author.
+func (r *Renderer) renderVal(t *model.Topic, sc model.Shortcode) (template.HTML, []model.Diagnostic) {
+	cr, msg := r.lookupCheck(sc)
+	if msg != "" {
+		return valErr("[val: " + msg + "]"), evDiag(t, sc, "val "+msg)
+	}
+	v := strings.TrimSpace(cr.Output)
+	name := html.EscapeString(strings.TrimSpace(sc.Args["check"]))
+	return template.HTML(`<span class="sg-val" title="computed by evidence/` + name + `">` + html.EscapeString(v) + `</span>`), nil
+}
+
+// renderData renders a check's structured stdout as a table (default) or a chart,
+// reusing the chart runtime — no data is transcribed into the article.
+func (r *Renderer) renderData(t *model.Topic, sc model.Shortcode, page tmpl.PageContext, id string) (template.HTML, []model.Diagnostic) {
+	cr, msg := r.lookupCheck(sc)
+	if msg != "" {
+		return valErr("[data: " + msg + "]"), evDiag(t, sc, "data "+msg)
+	}
+	switch as := strings.ToLower(strings.TrimSpace(sc.Args["as"])); as {
+	case "", "table":
+		name := html.EscapeString(strings.TrimSpace(sc.Args["check"]))
+		return template.HTML(`<div class="sg-data" data-check="` + name + `">` +
+			rowsTableHTML(claim.Rows(strings.TrimSpace(cr.Output), "csv")) + `</div>`), nil
+	case "bar", "line", "scatter":
+		chart := model.Shortcode{Name: "chart", Line: sc.Line, Args: map[string]string{
+			"type": as, "data": csvToPairs(cr.Output), "height": firstArg(sc.Args["height"], "300"),
+			"title": sc.Args["title"], "caption": sc.Args["caption"],
+			"xlabel": sc.Args["xlabel"], "ylabel": sc.Args["ylabel"], "labels": sc.Args["labels"],
+		}}
+		return r.eng.Render(chart, "", "", page, id, t.SourcePath)
+	default:
+		return valErr("[data: bad as]"), evDiag(t, sc, fmt.Sprintf("data: unknown as=%q (use table, bar, line, or scatter)", as))
+	}
+}
+
+// lookupCheck resolves the check= argument, returning a human message on failure.
+func (r *Renderer) lookupCheck(sc model.Shortcode) (CheckResult, string) {
+	name := strings.TrimSpace(sc.Args["check"])
+	if name == "" {
+		return CheckResult{}, `missing required argument "check"`
+	}
+	cr, ok := r.checks[name]
+	if !ok {
+		return CheckResult{}, fmt.Sprintf("references unknown evidence check %q", name)
+	}
+	if cr.Err != "" {
+		return CheckResult{}, fmt.Sprintf("check %q failed: %s", name, evFirstLine(cr.Err))
+	}
+	return cr, ""
+}
+
+func evDiag(t *model.Topic, sc model.Shortcode, msg string) []model.Diagnostic {
+	return []model.Diagnostic{{Severity: model.SevError, File: t.SourcePath, Line: sc.Line, Message: msg}}
+}
+
+func valErr(text string) template.HTML {
+	return template.HTML(`<span class="sg-val sg-val-err" title="unresolved evidence reference">` + html.EscapeString(text) + `</span>`)
+}
+
+// csvToPairs turns a check's CSV stdout into the chart template's "label:value"
+// data string (skipping a non-numeric header row).
+func csvToPairs(out string) string {
+	rows := claim.Rows(strings.TrimSpace(out), "csv")
+	start := 0
+	if len(rows) > 0 && len(rows[0]) >= 2 {
+		if _, err := strconv.ParseFloat(strings.TrimSpace(rows[0][len(rows[0])-1]), 64); err != nil {
+			start = 1 // header row
+		}
+	}
+	var pairs []string
+	for _, row := range rows[start:] {
+		if len(row) < 2 {
+			continue
+		}
+		pairs = append(pairs, strings.TrimSpace(row[0])+":"+strings.TrimSpace(row[len(row)-1]))
+	}
+	return strings.Join(pairs, ", ")
+}
+
+func firstArg(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func evFirstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func stripOuterP(s string) string {

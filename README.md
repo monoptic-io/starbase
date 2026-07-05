@@ -125,6 +125,14 @@ starts cold, so the **output comparison** — not input pinning — is what catc
 source that has drifted. Caching is by **content, not mtime** (`touch` won't
 re-run a check). Claims sort into **unsupported → attested → verified**.
 
+**Injection, not transcription.** Rather than the agent copying a value into the
+page (and `verify` catching mismatches), the page can reference a check and let
+the build supply the data: `{{< val check="X" >}}` injects a check's scalar
+stdout inline, and `{{< data check="X" as="bar" >}}` renders its CSV as a chart or
+table. `build` runs the checks (cached) and substitutes the results — so a
+fabricated number is *impossible*, because the model never writes one, and a page
+re-renders whenever a referenced check's output changes.
+
 When authoring, `starbase verify <dir> -show <check>` prints a check's exact
 stdout to paste into its result block, and `-v` lists every check (ran/cached) and
 claim outcome. See `examples/sales-research/` and the `research-claims` skill.

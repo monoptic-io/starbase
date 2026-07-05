@@ -246,6 +246,11 @@ th { background: var(--bg-elev); }
 .sg-ev-table th { background: var(--bg-elev2); }
 .sg-ev-code { margin: 0.5rem 0 0; }
 
+/* injected evidence values ({{< val >}}) — computed at build time, not typed */
+.sg-content .sg-val { border-bottom: 1px dotted var(--accent-2); cursor: help; }
+.sg-content .sg-val-err { color: var(--danger); border-bottom: 1px dashed var(--danger); }
+.sg-data { margin: 0.6rem 0; }
+
 .sg-quiz { margin: 1.6rem 0; }
 .sg-quiz-q { font-weight: 600; margin: 0 0 0.7rem; }
 .sg-quiz-options { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }

@@ -144,11 +144,14 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 
 	for _, t := range topics {
 		for _, sc := range t.Shortcodes {
-			if sc.Name == "claim" {
+			switch sc.Name {
+			case "claim":
 				diags = append(diags, claim.Validate(claim.Parse(sc), t.SourcePath, sc.Line)...)
-				continue
+			case "val", "data":
+				diags = append(diags, validateEvidenceRef(cfg, sc, t.SourcePath)...)
+			default:
+				diags = append(diags, eng.Validate(sc, t.SourcePath)...)
 			}
-			diags = append(diags, eng.Validate(sc, t.SourcePath)...)
 		}
 	}
 	return topics, reg, eng, diags, nil
@@ -385,9 +388,22 @@ func Build(cfg Config) (Result, error) {
 		bySlug[t.Slug] = t
 	}
 
+	// Build injects computed values (val/data shortcodes), so it depends on the
+	// evidence checks — cached, so it stays cheap in an authoring loop.
+	rr, _, evErr := evidence.Run(cfg.ContentDir, cfg.Force)
+	if evErr != nil {
+		res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
+			Severity: model.SevWarn, File: "evidence", Message: evErr.Error()})
+	}
+	checks := make(map[string]render.CheckResult, len(rr.Checks))
+	for n, ck := range rr.Checks {
+		checks[n] = render.CheckResult{Output: ck.Output, Err: ck.Err}
+	}
+	rd.SetChecks(checks)
+
 	// Render topic pages (incremental).
 	for _, t := range topics {
-		fp := fingerprint(cfg, t, g, bySlug, eng.Hash(), layoutHash(layout), site.AssetVersion)
+		fp := fingerprint(cfg, t, g, bySlug, eng.Hash(), layoutHash(layout), site.AssetVersion, evidenceHash(t, rr.Checks))
 		outFile := filepath.Join(cfg.OutDir, filepath.FromSlash(t.OutPath))
 		if !cfg.Force && c.PageFresh(t.OutPath, fp) && fileExists(outFile) {
 			res.Skipped++
@@ -449,9 +465,50 @@ func Build(cfg Config) (Result, error) {
 
 // --- fingerprint ---
 
-func fingerprint(cfg Config, t *model.Topic, g *graph.Graph, bySlug map[string]*model.Topic, engHash, layHash, assetVer string) string {
+// validateEvidenceRef checks a val/data shortcode without executing anything:
+// the check= argument is required, and evidence/<check>/run must exist (a dead
+// reference is a warning, like a dead wiki link).
+func validateEvidenceRef(cfg Config, sc model.Shortcode, file string) []model.Diagnostic {
+	name := strings.TrimSpace(sc.Args["check"])
+	if name == "" {
+		return []model.Diagnostic{{Severity: model.SevError, File: file, Line: sc.Line,
+			Message: fmt.Sprintf("%s: missing required argument %q", sc.Name, "check")}}
+	}
+	runPath := filepath.Join(cfg.ContentDir, "evidence", name, "run")
+	if fi, err := os.Stat(runPath); err != nil || fi.IsDir() {
+		return []model.Diagnostic{{Severity: model.SevWarn, File: file, Line: sc.Line,
+			Message: fmt.Sprintf("%s references evidence check %q, but evidence/%s/run does not exist", sc.Name, name, name)}}
+	}
+	return nil
+}
+
+// evidenceHash folds the outputs of the checks a page references into its
+// fingerprint, so the page re-renders when a check's computed value changes even
+// though its own markdown did not.
+func evidenceHash(t *model.Topic, checks map[string]evidence.Check) string {
+	var names []string
+	for _, sc := range t.Shortcodes {
+		if sc.Name == "val" || sc.Name == "data" {
+			if n := strings.TrimSpace(sc.Args["check"]); n != "" {
+				names = append(names, n)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
 	h := sha256.New()
-	fmt.Fprintf(h, "v2|%s|%s|%s|site=%s|assets=%s\n", t.ContentHash, engHash, layHash, cfg.SiteTitle, assetVer)
+	for _, n := range names {
+		ck := checks[n]
+		fmt.Fprintf(h, "E:%s|%s|%s\n", n, ck.Output, ck.Err)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func fingerprint(cfg Config, t *model.Topic, g *graph.Graph, bySlug map[string]*model.Topic, engHash, layHash, assetVer, evHash string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "v3|%s|%s|%s|site=%s|assets=%s|ev=%s\n", t.ContentHash, engHash, layHash, cfg.SiteTitle, assetVer, evHash)
 	// outbound resolved targets affect rendering (path + dead state)
 	for _, l := range t.Links {
 		fmt.Fprintf(h, "L:%s>%s:%v\n", l.Target, l.ResolvedSlug, l.Dead)

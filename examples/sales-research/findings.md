@@ -39,3 +39,16 @@ South,7900000
 Revenue grew **18% year over year** across every division — *this assertion has no
 evidence yet, so `check` flags it.*
 {{< /claim >}}
+
+## Figures, injected — not transcribed
+
+The numbers below are not typed into this document; starbase runs the evidence
+checks at build time and injects their output. The Midwest is served by
+{{< val check="midwest-regions" >}} regions, and here is 2025 revenue by division,
+drawn straight from the `revenue-by-division` check:
+
+{{< data check="revenue-by-division" as="bar" title="2025 revenue by division" ylabel="revenue" >}}
+
+The same check, as a table:
+
+{{< data check="revenue-by-division" as="table" >}}

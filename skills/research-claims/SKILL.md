@@ -12,11 +12,34 @@ its result. starbase runs nothing — *you* run the code; the shortcode surfaces
 
 ## The discipline
 
-**Never hand-type a number you did not compute.** When you assert a quantity:
+**Never hand-type a number you did not compute.** The strongest form of this is
+to not type the number *at all* — let the build inject it from a check.
 
-1. Run the query/script in your sandbox against a real source.
-2. Capture both the result and the exact code.
-3. Wrap the statement in a `claim` with that evidence attached.
+## Inject values, don't transcribe them
+
+When a check exists (see "Verifiable claims" below), reference its output instead
+of copying it. `build` runs the check (cached) and substitutes the real value, so
+a fabricated number is impossible — the model never writes one:
+
+```markdown
+The Midwest is served by {{< val check="midwest-regions" >}} regions.
+
+{{< data check="revenue-by-division" as="bar" title="2025 revenue by division" >}}
+{{< data check="revenue-by-division" as="table" >}}
+```
+
+- `{{< val check="X" >}}` injects the check's (scalar) stdout **inline** in prose.
+- `{{< data check="X" as="table|bar|line|scatter" >}}` renders the check's CSV
+  stdout as a **table** (default) or a **chart** — reusing the chart runtime, so a
+  figure's data is the verified computation, never a transcription.
+- A missing `check=` is an error; a reference to a non-existent `evidence/<X>/run`
+  is a warning (like a dead link); a check that *fails* breaks the build.
+- The page re-renders automatically when the check's output changes, even if the
+  prose didn't (the referenced check's output is part of the page's fingerprint).
+
+Prefer this for any load-bearing number. The `claim` shortcode below is still the
+way to show a statement *with its implementation and provenance in a drawer*; the
+two compose (put `{{< val >}}` inside a claim's prose).
 
 ## Syntax
 
