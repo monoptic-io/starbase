@@ -408,7 +408,17 @@ func (r *Renderer) renderVal(t *model.Topic, sc model.Shortcode) (template.HTML,
 	}
 	name := strings.TrimSpace(sc.Args["check"])
 	v := strings.TrimSpace(cr.Output)
-	if field := strings.TrimSpace(sc.Args["field"]); field != "" {
+	switch {
+	case strings.TrimSpace(sc.Args["col"]) != "":
+		col, row := strings.TrimSpace(sc.Args["col"]), strings.TrimSpace(sc.Args["row"])
+		got, ok := pickCell(cr.Output, col, row)
+		if !ok {
+			return valErr("[val: no cell " + col + "]"),
+				evDiag(t, sc, fmt.Sprintf("val: check %q has no column %q (row %q)", name, col, row))
+		}
+		v = got
+	case strings.TrimSpace(sc.Args["field"]) != "":
+		field := strings.TrimSpace(sc.Args["field"])
 		got, ok := pickField(cr.Output, field)
 		if !ok {
 			return valErr("[val: no field " + field + "]"),
@@ -418,6 +428,44 @@ func (r *Renderer) renderVal(t *model.Topic, sc model.Shortcode) (template.HTML,
 	}
 	return template.HTML(`<span class="sg-val" title="computed by evidence/` + html.EscapeString(name) + `">` +
 		html.EscapeString(v) + `</span>`), nil
+}
+
+// pickCell selects a cell from a check's tabular output by column header name.
+// row is a 1-indexed data row (default 1) or a value matched against column 0.
+func pickCell(output, col, row string) (string, bool) {
+	rows := claim.Rows(strings.TrimSpace(output), "")
+	if len(rows) < 2 {
+		return "", false
+	}
+	ci := -1
+	for i, h := range rows[0] {
+		if strings.EqualFold(strings.TrimSpace(h), col) {
+			ci = i
+			break
+		}
+	}
+	if ci < 0 {
+		return "", false
+	}
+	data := rows[1:]
+	ri := 0
+	if row != "" {
+		if n, err := strconv.Atoi(row); err == nil {
+			ri = n - 1
+		} else {
+			ri = -1
+			for i, r := range data {
+				if len(r) > 0 && strings.EqualFold(strings.TrimSpace(r[0]), row) {
+					ri = i
+					break
+				}
+			}
+		}
+	}
+	if ri < 0 || ri >= len(data) || ci >= len(data[ri]) {
+		return "", false
+	}
+	return strings.TrimSpace(data[ri][ci]), true
 }
 
 // pickField extracts a named field from a check's output, matching a

@@ -17,7 +17,7 @@ The quartet is the canonical argument for *looking* at data before trusting a mo
 The datasets live in `data/anscombe-1.csv` through `data/anscombe-4.csv`, each a column of $x$ and a column of $y$. Sets I, II, and III share the same eleven $x$ values; set IV holds $x$ constant at 8 for ten points and places the eleventh far out at 19. By construction the differences are invisible to the usual statistics:
 
 {{< claim check="anscombe-summary" source="data/anscombe-1.csv" asof="2026-06-30" >}}
-All four datasets agree, to two decimals, on **mean $x = 9.00$**, **mean $y = 7.50$**, **variance of $x = 11.00$**, **variance of $y \approx 4.12$**, **correlation $\approx 0.82$**, and the least-squares fit **$y = 3.00 + 0.50\,x$** — yet, as the plots show, they could hardly be more different.
+All four datasets agree, to two decimals, on mean $x =$ **{{< val check="anscombe-summary" col="mean_x" >}}**, mean $y =$ **{{< val check="anscombe-summary" col="mean_y" >}}**, variance of $x =$ **{{< val check="anscombe-summary" col="var_x" >}}**, variance of $y \approx$ **{{< val check="anscombe-summary" col="var_y" >}}**, correlation $\approx$ **{{< val check="anscombe-summary" col="corr" >}}**, and the least-squares line $y \approx$ **{{< val check="anscombe-summary" col="intercept" >}}** $+$ **{{< val check="anscombe-summary" col="slope" >}}** $x$ — yet, as the plots show, they could hardly be more different.
 
 ```python
 # evidence/anscombe-summary/{inputs: data/anscombe-{1,2,3,4}.csv (4th -> set4.csv), run}
