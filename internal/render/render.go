@@ -308,21 +308,42 @@ func (r *Renderer) renderClaim(t *model.Topic, sc model.Shortcode, id string, de
 	pp, pr, _, diags := r.renderBody(t, info.Prose, depth+1)
 	proseHTML := stripOuterP(substitute(pp, pr))
 
+	// A bound check that ran cleanly is verified; a pasted result/source is
+	// attested; nothing is unsupported.
+	computed, hasComputed := CheckResult{}, false
+	if info.Check != "" {
+		if cr, ok := r.checks[info.Check]; ok && cr.Err == "" {
+			computed, hasComputed = cr, strings.TrimSpace(cr.Output) != ""
+		}
+	}
+
 	var b strings.Builder
 	b.WriteString(`<div class="sg-claim">`)
 	b.WriteString(`<div class="sg-claim-text">` + proseHTML)
-	if info.HasImpl || info.Source != "" {
+	switch {
+	case hasComputed:
+		b.WriteString(` <span class="sg-claim-badge sg-claim-verified" title="recomputed at build time">verified</span>`)
+	case info.HasImpl || info.Source != "":
 		b.WriteString(` <span class="sg-claim-badge" title="evidence attached">evidence</span>`)
-	} else {
+	default:
 		b.WriteString(` <span class="sg-claim-badge sg-claim-unsupported" title="no evidence yet">unsupported</span>`)
 	}
 	b.WriteString(`</div>`)
 
-	if info.HasImpl || info.Source != "" || info.Result != "" {
+	// The displayed result is the pasted block if present, else the check's own
+	// (verified) output — so tables need not be transcribed into the article.
+	resultHTML := ""
+	if info.Result != "" {
+		resultHTML = claimResultHTML(info)
+	} else if hasComputed {
+		resultHTML = rowsTableHTML(claim.Rows(strings.TrimSpace(computed.Output), "csv"))
+	}
+
+	if info.HasImpl || info.Source != "" || resultHTML != "" || hasComputed {
 		b.WriteString(`<details class="sg-evidence"><summary>How we know this</summary>`)
 		var meta []string
-		if info.Value != "" {
-			meta = append(meta, "value <b>"+html.EscapeString(info.Value)+"</b>")
+		if info.Check != "" && hasComputed {
+			meta = append(meta, "computed by <code>evidence/"+html.EscapeString(info.Check)+"</code>")
 		}
 		if info.Source != "" {
 			meta = append(meta, "source <code>"+html.EscapeString(info.Source)+"</code>")
@@ -333,8 +354,8 @@ func (r *Renderer) renderClaim(t *model.Topic, sc model.Shortcode, id string, de
 		if len(meta) > 0 {
 			b.WriteString(`<div class="sg-ev-meta">` + strings.Join(meta, " · ") + `</div>`)
 		}
-		if info.Result != "" {
-			b.WriteString(claimResultHTML(info))
+		if resultHTML != "" {
+			b.WriteString(resultHTML)
 		}
 		if info.HasImpl {
 			lang := info.Lang
@@ -385,9 +406,28 @@ func (r *Renderer) renderVal(t *model.Topic, sc model.Shortcode) (template.HTML,
 	if msg != "" {
 		return valErr("[val: " + msg + "]"), evDiag(t, sc, "val "+msg)
 	}
+	name := strings.TrimSpace(sc.Args["check"])
 	v := strings.TrimSpace(cr.Output)
-	name := html.EscapeString(strings.TrimSpace(sc.Args["check"]))
-	return template.HTML(`<span class="sg-val" title="computed by evidence/` + name + `">` + html.EscapeString(v) + `</span>`), nil
+	if field := strings.TrimSpace(sc.Args["field"]); field != "" {
+		got, ok := pickField(cr.Output, field)
+		if !ok {
+			return valErr("[val: no field " + field + "]"),
+				evDiag(t, sc, fmt.Sprintf("val: check %q output has no field %q", name, field))
+		}
+		v = got
+	}
+	return template.HTML(`<span class="sg-val" title="computed by evidence/` + html.EscapeString(name) + `">` +
+		html.EscapeString(v) + `</span>`), nil
+}
+
+// pickField extracts a named field from a check's output, matching a
+// `field = value`, `field: value`, or `field ~ value` token (whole word).
+func pickField(output, field string) (string, bool) {
+	re := regexp.MustCompile(`(?mi)\b` + regexp.QuoteMeta(field) + `\b\s*[=:~]\s*([^\s,;]+)`)
+	if m := re.FindStringSubmatch(output); m != nil {
+		return m[1], true
+	}
+	return "", false
 }
 
 // renderData renders a check's structured stdout as a table (default) or a chart,

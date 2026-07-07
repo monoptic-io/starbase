@@ -37,8 +37,8 @@ The intuition: lay the numbers out on a logarithmic ruler, where the distance fr
 
 Talk is cheap; the law is checkable. The dataset `data/world-figures.csv` holds **292** genuine reference figures — the 2023 population and the land area in km² of 146 countries. These span from Luxembourg's 2,586 km² to Russia's 17 million km², and from Iceland's 375 thousand people to China's 1.4 billion: many orders of magnitude, exactly the regime where Benford should bite. Stripping each value down to its leading digit and tallying gives:
 
-{{< claim value="maxdev 1.7%" check="benford-leading-digits" source="data/world-figures.csv" asof="2026-06-30" >}}
-Across all **292** figures the observed leading-digit distribution tracks Benford's prediction strikingly well — a chi-square statistic of just **3.22** (well under the 15.5 critical value for 8 degrees of freedom at the 5% level) and a largest single-digit gap of only **1.7** percentage points.
+{{< claim check="benford-leading-digits" source="data/world-figures.csv" asof="2026-06-30" >}}
+Across all **{{< val check="benford-leading-digits" field="N" >}}** figures the observed leading-digit distribution tracks Benford's prediction strikingly well — a chi-square statistic of just **{{< val check="benford-leading-digits" field="chi2" >}}** (well under the 15.5 critical value for 8 degrees of freedom at the 5% level) and a largest single-digit gap of only **{{< val check="benford-leading-digits" field="maxdev" >}}**.
 ```sh
 # evidence/benford-leading-digits/{inputs: data/world-figures.csv, run}
 LC_ALL=C awk -F, '
@@ -52,34 +52,18 @@ END { split("0.301 0.176 0.125 0.097 0.079 0.067 0.058 0.051 0.046", b, " ")
         printf "%d      %5d   %6.1f%%   %5.1f%%\n", d, c[d], obs*100, b[d]*100 }
       printf "N=%d  chi2=%.2f  maxdev=%.1f%%\n", n, chi2, maxdev }' world-figures.csv
 ```
-```result
-digit  count  observed  benford
-1         85     29.1%    30.1%
-2         53     18.2%    17.6%
-3         37     12.7%    12.5%
-4         25      8.6%     9.7%
-5         26      8.9%     7.9%
-6         23      7.9%     6.7%
-7         12      4.1%     5.8%
-8         16      5.5%     5.1%
-9         15      5.1%     4.6%
-N=292  chi2=3.22  maxdev=1.7%
-```
 {{< /claim >}}
 
 The single most visible signature of the law is the dominance of the digit 1:
 
-{{< claim value="29.1%" check="benford-digit-one" source="data/world-figures.csv" asof="2026-06-30" >}}
-**85 of the 292 figures — 29.1%** — begin with the digit 1, almost exactly Benford's predicted $\log_{10} 2 = 30.1\%$ and nearly triple the **11.1%** a "uniform" guess would give.
+{{< claim check="benford-digit-one" source="data/world-figures.csv" asof="2026-06-30" >}}
+About **{{< val check="benford-digit-one" >}}** of the figures begin with the digit 1, almost exactly Benford's predicted $\log_{10} 2 = 30.1\%$ and nearly triple the **11.1%** a "uniform" guess would give.
 ```sh
 # evidence/benford-digit-one/{inputs: data/world-figures.csv, run}
 LC_ALL=C awk -F, '
 NR>1 { v=$3; sub(/^[^1-9]*/, "", v); d=substr(v,1,1)+0
        if (d>=1 && d<=9) { n++; if (d==1) ones++ } }
-END { printf "%d of %d figures (%.1f%%) lead with digit 1\n", ones, n, 100*ones/n }' world-figures.csv
-```
-```result
-85 of 292 figures (29.1%) lead with digit 1
+END { printf "%.1f%%\n", 100*ones/n }' world-figures.csv
 ```
 {{< /claim >}}
 

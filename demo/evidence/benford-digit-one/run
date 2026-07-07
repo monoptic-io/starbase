@@ -1,12 +1,7 @@
 #!/bin/sh
 # inputs: data/world-figures.csv  (staged here as world-figures.csv)
-# Share of figures whose leading digit is 1. Benford predicts log10(2)=30.1%;
-# a uniform "every digit equally likely" guess would predict 11.1%.
+# Share of figures whose leading digit is 1 (Benford predicts log10(2)=30.1%).
 LC_ALL=C awk -F, '
-NR>1 {
-  v=$3; sub(/^[^1-9]*/, "", v); d = substr(v,1,1) + 0
-  if (d>=1 && d<=9) { n++; if (d==1) ones++ }
-}
-END { printf "%d of %d figures (%.1f%%) lead with digit 1\n", ones, n, 100*ones/n }
-' world-figures.csv
-
+NR>1 { v=$3; sub(/^[^1-9]*/, "", v); d=substr(v,1,1)+0
+       if (d>=1 && d<=9) { n++; if (d==1) ones++ } }
+END { printf "%.1f%%\n", 100*ones/n }' world-figures.csv

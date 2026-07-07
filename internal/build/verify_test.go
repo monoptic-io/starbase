@@ -68,8 +68,9 @@ func TestCompareClaim(t *testing.T) {
 	if valueInText("4", "42") {
 		t.Error("value must match whole words, not substrings")
 	}
-	// a check claim embedding neither a result block nor a value has nothing to verify
-	if msg := compareClaim(claim.Info{Check: "x"}, evidence.Check{Output: "anything"}); msg == "" {
-		t.Error("a claim with neither result nor value should be flagged")
+	// a check-bound claim with neither a result block nor a value is verified by
+	// injection — there is no author-typed number to disagree with the computation
+	if msg := compareClaim(claim.Info{Check: "x"}, evidence.Check{Output: "anything"}); msg != "" {
+		t.Errorf("a check-bound claim relying on injection should verify, got %q", msg)
 	}
 }

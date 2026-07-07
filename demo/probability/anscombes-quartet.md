@@ -29,14 +29,6 @@ for i, path in enumerate(files, start=1):
     print("%3d  %6.2f  %6.2f  %5.2f  %5.2f  %5.3f  %5.2f  %9.2f"
           % (i, mx, my, vx, vy, r, slope, intercept))
 ```
-
-```result
-set  mean_x  mean_y  var_x  var_y   corr  slope  intercept
-  1    9.00    7.50  11.00   4.13  0.816   0.50       3.00
-  2    9.00    7.50  11.00   4.13  0.816   0.50       3.00
-  3    9.00    7.50  11.00   4.12  0.816   0.50       3.00
-  4    9.00    7.50  11.00   4.12  0.817   0.50       3.00
-```
 {{< /claim >}}
 
 The faint wobble in the last column — the correlation reads `0.816` for the first three sets and `0.817` for the fourth — is real but immaterial: rounded to the two decimals a reader actually reports, every dataset carries the identical correlation.
@@ -52,8 +44,8 @@ The faint wobble in the last column — the correlation reads `0.816` for the fi
 
 The headline statistic of the quartet is its shared correlation. It is the same — to the precision anyone reports it — across all four datasets, which is exactly why it is such a treacherous summary on its own:
 
-{{< claim value="0.82" check="anscombe-correlation" source="data/anscombe-1.csv" asof="2026-06-30" >}}
-Every dataset in the quartet has a Pearson correlation of **0.82** between $x$ and $y$ (each is $0.816\ldots$, the fourth $0.8165$) — yet only Set I is actually a noisy straight line. Identical correlation, four different stories.
+{{< claim check="anscombe-correlation" source="data/anscombe-1.csv" asof="2026-06-30" >}}
+Every dataset in the quartet has a Pearson correlation of **{{< val check="anscombe-correlation" >}}** between $x$ and $y$ (each is $0.816\ldots$, the fourth $0.8165$) — yet only Set I is actually a noisy straight line. Identical correlation, four different stories.
 
 ```python
 # evidence/anscombe-correlation/{inputs: data/anscombe-{1,2,3,4}.csv, run}

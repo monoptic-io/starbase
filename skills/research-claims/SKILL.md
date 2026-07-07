@@ -29,6 +29,10 @@ The Midwest is served by {{< val check="midwest-regions" >}} regions.
 ```
 
 - `{{< val check="X" >}}` injects the check's (scalar) stdout **inline** in prose.
+  If the check prints several fields, pull one with `field=`: `{{< val check="X"
+  field="chi2" >}}` matches a `chi2=3.22`, `chi2: 3.22`, or `chi2 ~ 3.22` token in
+  the output. (Note: injections don't render inside `$…$` math — put the value
+  just outside, e.g. `$\delta \approx$ **{{< val … >}}**`.)
 - `{{< data check="X" as="table|bar|line|scatter" >}}` renders the check's CSV
   stdout as a **table** (default) or a **chart** — reusing the chart runtime, so a
   figure's data is the verified computation, never a transcription.
@@ -37,9 +41,10 @@ The Midwest is served by {{< val check="midwest-regions" >}} regions.
 - The page re-renders automatically when the check's output changes, even if the
   prose didn't (the referenced check's output is part of the page's fingerprint).
 
-Prefer this for any load-bearing number. The `claim` shortcode below is still the
-way to show a statement *with its implementation and provenance in a drawer*; the
-two compose (put `{{< val >}}` inside a claim's prose).
+Prefer this for any load-bearing number. The `claim` shortcode below composes with
+injection: bind it to a `check` with **no `value` or `result` block**, put
+`{{< val >}}` in its prose, and the claim shows a **verified** badge and a drawer
+that auto-displays the check's live output and provenance — nothing transcribed.
 
 ## Syntax
 

@@ -257,7 +257,10 @@ func compareClaim(info claim.Info, ck evidence.Check) string {
 	result := strings.TrimSpace(info.Result)
 	value := strings.TrimSpace(info.Value)
 	if result == "" && value == "" {
-		return fmt.Sprintf("claim check %q ran, but the claim embeds nothing to verify against it — add a result block or value=", info.Check)
+		// Nothing transcribed to compare: the claim references a check that ran
+		// cleanly and its output is injected/shown. That is verified by
+		// construction — there is no author-typed number to disagree with.
+		return ""
 	}
 	if result != "" && normalizeText(ck.Output) != normalizeText(result) {
 		return fmt.Sprintf("claim check %q: the article's result does not match the computation\n%s",

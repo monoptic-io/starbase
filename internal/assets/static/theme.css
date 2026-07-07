@@ -245,6 +245,7 @@ th { background: var(--bg-elev); }
 .sg-ev-table { width: auto; min-width: 40%; margin: 0.5rem 0; font-size: 0.84rem; }
 .sg-ev-table th { background: var(--bg-elev2); }
 .sg-ev-code { margin: 0.5rem 0 0; }
+.sg-claim-verified { color: var(--ok, #4caf82); border-color: var(--ok, #4caf82); }
 
 /* injected evidence values ({{< val >}}) — computed at build time, not typed */
 .sg-content .sg-val { border-bottom: 1px dotted var(--accent-2); cursor: help; }

@@ -18,8 +18,8 @@ This is the **Feigenbaum constant**. Mitchell Feigenbaum discovered in the 1970s
 
 We can pin the cascade down from first principles, with no data and no fitting — just the arithmetic of $x \mapsto r\,x(1-x)$. The trick is that a period-$2^{\,n-1}$ cycle loses [[Stability|stability]] *exactly* where its **multiplier** — the product of the slope $f'(x)=r(1-2x)$ taken around the cycle — passes through $-1$. That $r$ is the [[Bifurcation|bifurcation]] $r_n$ at which the period doubles. Solving the cycle equations with Newton's method and driving the multiplier to $-1$ with a secant step locates each $r_n$ to machine precision:
 
-{{< claim value="4.669" check="feigenbaum-delta" asof="2026-06-30" >}}
-The first six period-doubling thresholds are $r_1=3$ (period $1\to2$), $r_2=1+\sqrt6\approx3.4495$, $r_3\approx3.5441$, $r_4\approx3.5644$, $r_5\approx3.5688$, $r_6\approx3.5697$. The successive gap ratios $\delta_n$ march **4.75, 4.66, 4.668, 4.669** — already converging on Feigenbaum's $\delta\approx\mathbf{4.669}$ by the fifth doubling.
+{{< claim check="feigenbaum-delta" asof="2026-06-30" >}}
+The first six period-doubling thresholds are $r_1=3$ (period $1\to2$), $r_2=1+\sqrt6\approx3.4495$, $r_3\approx3.5441$, $r_4\approx3.5644$, $r_5\approx3.5688$, $r_6\approx3.5697$. The successive gap ratios $\delta_n$ march 4.75, 4.66, 4.668, 4.669 — already converging on Feigenbaum's $\delta \approx$ **{{< val check="feigenbaum-delta" field="delta" >}}** by the fifth doubling.
 
 ```python
 #!/usr/bin/env python3
@@ -63,17 +63,6 @@ for i in range(len(b)):
 best = (b[-2] - b[-3]) / (b[-1] - b[-2])
 print(f"best ratio delta_5 = {best:.5f}  ->  delta ~ 4.669  (Feigenbaum 4.6692016...)")
 ```
-
-```result
-n  period  r_n (bifurcation)      gap             delta_n
-1       1  3.0000000000
-2       2  3.4494897428    0.4494897428
-3       4  3.5440903596    0.0946006168     4.75145
-4       8  3.5644072661    0.0203169065     4.65625
-5      16  3.5687594195    0.0043521534     4.66824
-6      32  3.5696916098    0.0009321903     4.66874
-best ratio delta_5 = 4.66874  ->  delta ~ 4.669  (Feigenbaum 4.6692016...)
-```
 {{< /claim >}}
 
 The convergence is not monotone-from-one-side or accidental: it is the geometric signature of the cascade. Each gap is very nearly $\delta^{-1}$ times the one before, so the doublings accumulate at a *finite* parameter rather than running off to $r=4$.
@@ -82,8 +71,8 @@ The convergence is not monotone-from-one-side or accidental: it is the geometric
 
 Because the gaps shrink by a constant factor, the infinite tally of bifurcations converges. Summing the remaining geometric tail of gaps past the ones we computed gives the **accumulation point** $r_\infty$ — the exact parameter where the period first becomes infinite and the orbit, no longer settling onto any finite cycle, lands on a [[Strange Attractor|strange attractor]] of [[Fractal|fractal]] (Cantor-set) structure:
 
-{{< claim value="3.56995" check="feigenbaum-accumulation" asof="2026-06-30" >}}
-Extrapolating past the sixth doubling, the cascade accumulates at $r_\infty \approx \mathbf{3.56995}$. Cross this threshold and the logistic map exhibits [[Sensitive Dependence on Initial Conditions|sensitive dependence on initial conditions]]: nearby orbits separate exponentially and long-term prediction collapses.
+{{< claim check="feigenbaum-accumulation" asof="2026-06-30" >}}
+Extrapolating past the sixth doubling, the cascade accumulates at $r_\infty \approx$ **{{< val check="feigenbaum-accumulation" field="r_inf" >}}**. Cross this threshold and the logistic map exhibits [[Sensitive Dependence on Initial Conditions|sensitive dependence on initial conditions]]: nearby orbits separate exponentially and long-term prediction collapses.
 
 ```python
 #!/usr/bin/env python3
@@ -102,14 +91,6 @@ print(f"b6 (period 32 -> 64) = {b6:.10f}")
 print(f"last gap b6-b5       = {last_gap:.10f}")
 print(f"geometric tail / delta = {tail:.10f}")
 print(f"accumulation r_inf   = {r_inf:.5f}  (true 3.5699456...)")
-```
-
-```result
-b5 (period 16 -> 32) = 3.5687594195
-b6 (period 32 -> 64) = 3.5696916098
-last gap b6-b5       = 0.0009321903
-geometric tail / delta = 0.0002540581
-accumulation r_inf   = 3.56995  (true 3.5699456...)
 ```
 {{< /claim >}}
 
