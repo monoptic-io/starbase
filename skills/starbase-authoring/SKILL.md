@@ -100,6 +100,17 @@ template*:
 For building visualizations and simulations, see the **interactive-content**
 skill. For building out a whole subject area, see **flesh-out-subject**.
 
+## Evidence-backed numbers
+
+Any load-bearing figure should trace to the computation behind it, not be
+hand-typed. starbase runs a program you write under `evidence/<check>/` and
+**injects** its output into the page — `{{< val check="X" >}}` for a scalar in
+prose, `{{< data check="X" as="table|bar|line|scatter|<template>" >}}` for a
+table, chart, or any template — so a fabricated number is impossible. `starbase
+verify <dir>` re-runs the checks and fails if the article and the computation
+disagree; wire it into CI. See the **research-claims** skill for the full
+workflow (the `{{< claim >}}` shortcode, `evidence/` layout, and injection).
+
 ## Math
 
 Write inline math with `$...$` and display math with `$$...$$` directly in

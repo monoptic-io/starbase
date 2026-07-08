@@ -60,12 +60,16 @@ locals in scope:
 | local    | meaning                                            |
 |----------|----------------------------------------------------|
 | `ctx`    | 2D canvas context (already cleared each frame)     |
+| `canvas` | the `<canvas>` element itself                      |
 | `W`, `H` | canvas size in CSS pixels                          |
 | `t`      | seconds since start                                |
 | `dt`     | seconds since last frame                           |
 | `frame`  | frame counter (use `if (frame===0){…}` for setup)  |
-| `mouse`  | `{x, y, down}` pointer state                       |
+| `mouse`  | `{x, y, down, clicked}` pointer state (`clicked` is true for one frame on press) |
 | `state`  | a persistent object to stash values between frames |
+
+The body runs inside `with (Math)`, so `sin`, `cos`, `PI`, `hypot`, … are in
+scope directly (no `Math.` prefix needed).
 
 ```markdown
 {{< sketch height="320" caption="A traveling wave you can poke." >}}

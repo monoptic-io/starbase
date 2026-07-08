@@ -56,6 +56,7 @@ Iterate the loop until clean:
 
 ```
 starbase check <dir>          # 0 errors, 0 warnings is the bar
+starbase verify <dir>         # re-run evidence checks; every claim must still match
 starbase build <dir> -o _site -title "<Subject>"
 ```
 
@@ -73,6 +74,8 @@ Open the built site and click around as a reader would. Ask:
 Before declaring a subject done, confirm:
 
 - [ ] `starbase check` is completely clean.
+- [ ] `starbase verify` passes — every load-bearing number is an evidence-backed
+      claim (see **research-claims**), not a hand-typed figure.
 - [ ] Every section folder has an `index.md`.
 - [ ] No orphan pages (every topic has at least one inbound link).
 - [ ] Pillar topics are richly linked and have strong interactive demos.
