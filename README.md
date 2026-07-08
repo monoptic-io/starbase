@@ -185,8 +185,20 @@ The `internal/` packages are small and single-purpose
 
 ## Skills
 
-The `skills/` directory contains authoring guides for agents:
-`starbase-authoring`, `interactive-content`, `flesh-out-subject`, and `research-claims`.
+Agent-facing authoring guides — `starbase-authoring`, `interactive-content`,
+`flesh-out-subject`, and `research-claims` — are **embedded in the binary**
+(source in `internal/assets/skills/`) and version-locked to it. They are planted
+into a KB repo's `.claude/skills/`, where Claude Code discovers them
+automatically:
+
+```sh
+starbase init mykb        # scaffold a new KB repo (topics, Pages workflow, skills)
+starbase skills           # (re-)emit the skills into .claude/skills/, edit-safely
+```
+
+After upgrading the binary, `starbase check` notes if a repo's emitted skills are
+stale; `starbase skills` refreshes the untouched ones while preserving any you
+edited (a `.claude/skills/.starbase-version` manifest tracks this).
 
 ## Demo
 

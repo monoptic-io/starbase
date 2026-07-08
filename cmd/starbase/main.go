@@ -35,6 +35,12 @@ func main() {
 		os.Exit(runVerify(os.Args[2:]))
 	case "templates":
 		os.Exit(runTemplates(os.Args[2:]))
+	case "init":
+		os.Exit(runInit(os.Args[2:]))
+	case "skills":
+		os.Exit(runSkills(os.Args[2:]))
+	case "version", "--version":
+		os.Exit(runVersion(os.Args[2:]))
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -55,6 +61,11 @@ Commands:
                         -v lists each check/claim; -show <check> prints a
                         check's raw stdout to copy into its result block.
   templates [dir]       List available shortcode templates and their arguments.
+  init [dir]            Scaffold a new KB repo (starter topics, Pages workflow,
+                        CLAUDE.md, and the authoring skills in .claude/skills/).
+  skills                Emit/refresh the authoring skills into .claude/skills/
+                        (edit-safe; run after upgrading the binary).
+  version               Print the starbase version.
 
 Run "starbase build -h" or "starbase check -h" for flags.
 `)
@@ -146,6 +157,7 @@ func runCheck(args []string) int {
 	printDiagnostics(res.Diagnostics)
 	fmt.Printf("checked %d topics: %d error(s), %d warning(s)\n",
 		res.Topics, res.Errors(), res.Warnings())
+	noteSkillsDrift(cfg.ContentDir)
 	if res.Errors() > 0 || (*strict && res.Warnings() > 0) {
 		return 1
 	}

@@ -108,6 +108,12 @@ var ignoredDirs = map[string]bool{
 	"node_modules": true, "_site": true, "dist": true,
 }
 
+// ignoredFiles are meta/instruction markdown files that live in a content-at-root
+// repo but are not topics (agent instructions, contribution notes).
+var ignoredFiles = map[string]bool{
+	"CLAUDE.md": true, "AGENTS.md": true, "README.md": true, "CONTRIBUTING.md": true,
+}
+
 // index runs the shared parse + resolve + validate phase used by both commands.
 func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []model.Diagnostic, error) {
 	files, err := collectMarkdown(cfg)
@@ -917,6 +923,7 @@ func collectMarkdown(cfg Config) ([]string, error) {
 		}
 		name := d.Name()
 		if strings.HasSuffix(name, ".md") && !strings.HasPrefix(name, ".") &&
+			!ignoredFiles[name] &&
 			(!strings.HasPrefix(name, "_") || name == "_index.md") {
 			rel, _ := filepath.Rel(root, p)
 			files = append(files, filepath.ToSlash(rel))

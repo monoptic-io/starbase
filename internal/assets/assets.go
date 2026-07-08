@@ -10,3 +10,12 @@ import "embed"
 
 //go:embed templates layout static
 var FS embed.FS
+
+// Skills holds the agent-facing authoring guides, embedded so `starbase init`
+// and `starbase skills` can plant them into a KB repo (in .claude/skills/,
+// where Claude Code discovers them) without any external files. They are
+// version-locked to the binary: emitting always writes the manual that matches
+// this build.
+//
+//go:embed skills
+var Skills embed.FS
