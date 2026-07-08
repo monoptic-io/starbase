@@ -54,7 +54,8 @@ func runInit(args []string) int {
 	}
 	printEmit(res.Skills)
 	fmt.Printf("\nInitialized a starbase KB in %s\n", dir)
-	fmt.Printf("Next:\n  starbase check %s\n  starbase build %s -o _site\n", dir, dir)
+	fmt.Printf("Next:\n  cd %s\n  starbase check %s\n  starbase build %s -o _site\n",
+		dir, scaffold.ContentSubdir, scaffold.ContentSubdir)
 	return 0
 }
 

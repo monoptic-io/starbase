@@ -92,6 +92,37 @@ func TestEmitSkillsRemovesPristineOrphans(t *testing.T) {
 	}
 }
 
+func TestInitLayout(t *testing.T) {
+	dir := t.TempDir()
+	res, err := Init(dir, "Coral Reefs", "v1.0.0", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Content lives in a subdir; repo meta lives at the root, separate from it.
+	mustExist(t, dir, ContentSubdir+"/index.md")
+	mustExist(t, dir, ContentSubdir+"/getting-started.md")
+	mustExist(t, dir, "CLAUDE.md")
+	mustExist(t, dir, ".github/workflows/pages.yml")
+	mustExist(t, dir, SkillsDir+"/research-claims/SKILL.md")
+	// No markdown meta files inside the content dir — nothing to deny-list.
+	entries, _ := os.ReadDir(filepath.Join(dir, ContentSubdir))
+	for _, e := range entries {
+		if e.Name() == "CLAUDE.md" || e.Name() == "README.md" {
+			t.Fatalf("meta file %s leaked into content dir", e.Name())
+		}
+	}
+	if len(res.Skills.Written) == 0 {
+		t.Fatal("skills should be emitted")
+	}
+}
+
+func mustExist(t *testing.T, dir, rel string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
+		t.Fatalf("expected %s: %v", rel, err)
+	}
+}
+
 func TestDetectDrift(t *testing.T) {
 	repo := t.TempDir()
 	skills := filepath.Join(repo, SkillsDir)

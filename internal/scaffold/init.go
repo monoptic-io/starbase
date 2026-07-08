@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// ContentSubdir is where Init places the KB itself, kept separate from repo
+// meta (.github/, .claude/, CLAUDE.md) so build/check only ever see topics —
+// no denylist of meta files needed.
+const ContentSubdir = "content"
+
 // InitResult summarizes a scaffold.
 type InitResult struct {
 	Created []string // repo-relative paths written
@@ -16,11 +21,12 @@ type InitResult struct {
 	Dir     string
 }
 
-// Init scaffolds a content-at-root starbase KB in dir: a couple of starter
-// topics, a Pages workflow, a CLAUDE.md operating manual, a .gitignore, and the
-// skills under .claude/skills/. Existing files are never overwritten (so it is
-// safe to run in a partially set-up repo); skills are emitted edit-safely. The
-// result builds green under `starbase check` immediately.
+// Init scaffolds a starbase KB repo in dir: repo meta at the root (a Pages
+// workflow, CLAUDE.md, .gitignore, and the skills under .claude/skills/) and the
+// KB content in a content/ subdirectory. Keeping content in its own directory
+// means build/check never encounter repo files like README.md. Existing files
+// are never overwritten (safe to run in a partially set-up repo); skills are
+// emitted edit-safely. It builds green under `starbase check content`.
 func Init(dir, title, version string, force bool) (InitResult, error) {
 	res := InitResult{Dir: dir}
 	if strings.TrimSpace(title) == "" {
@@ -31,11 +37,11 @@ func Init(dir, title, version string, force bool) (InitResult, error) {
 	}
 
 	files := map[string]string{
-		"index.md":                    fmt.Sprintf(indexTmpl, title),
-		"getting-started.md":          gettingStartedTmpl,
-		".gitignore":                  gitignoreTmpl,
-		"CLAUDE.md":                   fmt.Sprintf(claudeTmpl, title),
-		".github/workflows/pages.yml": fmt.Sprintf(pagesTmpl, title),
+		".gitignore":                          gitignoreTmpl,
+		"CLAUDE.md":                           fmt.Sprintf(claudeTmpl, title, ContentSubdir),
+		".github/workflows/pages.yml":         fmt.Sprintf(pagesTmpl, title, ContentSubdir),
+		ContentSubdir + "/index.md":           fmt.Sprintf(indexTmpl, title),
+		ContentSubdir + "/getting-started.md": fmt.Sprintf(gettingStartedTmpl, ContentSubdir),
 	}
 	rels := make([]string, 0, len(files))
 	for rel := range files {
@@ -86,15 +92,15 @@ summary: How this knowledge base is organized and how to add to it.
 
 # Getting Started
 
-Every ` + "`.md`" + ` file is a **topic**, identified by its title. Link between
-topics by name with ` + "`[[Wiki Links]]`" + ` — a link to a page that does not exist
-yet is a *dead link*, your worklist for what to write next.
+Every ` + "`.md`" + ` file under ` + "`%[1]s/`" + ` is a **topic**, identified by its
+title. Link between topics by name with ` + "`[[Wiki Links]]`" + ` — a link to a page
+that does not exist yet is a *dead link*, your worklist for what to write next.
 
-Author in a tight loop:
+Author in a tight loop (from the repo root):
 
 ` + "```sh" + `
-starbase check .      # dead links + bad template calls — drive this to zero
-starbase build . -o _site -title "Your Title"
+starbase check %[1]s      # dead links + bad template calls — drive this to zero
+starbase build %[1]s -o _site
 ` + "```" + `
 
 See the guides in ` + "`.claude/skills/`" + ` for the full authoring workflow:
@@ -103,8 +109,8 @@ numbers with re-runnable evidence.
 
 ## Add your first topic
 
-Create a new ` + "`.md`" + ` file, give it a ` + "`title`" + `, and link to it from
-[[Home]]. Run ` + "`starbase check .`" + ` and fix whatever it reports.
+Create a new ` + "`.md`" + ` file under ` + "`%[1]s/`" + `, give it a ` + "`title`" + `, and
+link to it from [[Home]]. Run ` + "`starbase check %[1]s`" + ` and fix what it reports.
 `
 
 const gitignoreTmpl = `# starbase build output
@@ -113,29 +119,32 @@ _site/
 
 const claudeTmpl = `# %[1]s — a starbase knowledge base
 
-This repo is a **starbase** knowledge base: a tree of markdown topics that
-builds into an interactive, fully static website.
+This repo is a **starbase** knowledge base: a tree of markdown topics (in
+` + "`%[2]s/`" + `) that builds into an interactive, fully static website.
 
 ## The loop
 
-Author in tight cycles. After every batch of edits:
+Author in tight cycles. After every batch of edits, from the repo root:
 
-    starbase check .        # dead links + bad template calls (fast, no render)
+    starbase check %[2]s        # dead links + bad template calls (fast, no render)
 
 Drive every error and warning to zero. A dead link means a topic still needs
 writing; an unsupported claim means a number still needs evidence. Then:
 
-    starbase verify .       # re-run evidence checks; every claim must still match
-    starbase build . -o _site -title "%[1]s"
+    starbase verify %[2]s       # re-run evidence checks; every claim must still match
+    starbase build %[2]s -o _site
 
-## Where the manual lives
+## Layout
 
-Full authoring guides are in ` + "`.claude/skills/`" + ` and are picked up
-automatically. They cover writing interlinked topics, embedding charts /
-simulations / custom JavaScript widgets, and backing load-bearing numbers with
-re-runnable evidence (` + "`{{< val >}}`" + ` / ` + "`{{< data >}}`" + ` / ` + "`{{< claim >}}`" + `).
+- ` + "`%[2]s/`" + ` — the KB content (topics, plus optional ` + "`templates/`, `evidence/`, `data/`" + `).
+- ` + "`.claude/skills/`" + ` — authoring guides, picked up automatically.
+- Repo meta (this file, ` + "`.github/`" + `) stays out of ` + "`%[2]s/`" + ` so it is never
+  rendered as a topic. Build/check the ` + "`%[2]s`" + ` directory, not the repo root.
 
-Run ` + "`starbase templates .`" + ` to list every shortcode and its arguments.
+The skills cover writing interlinked topics, embedding charts / simulations /
+custom JavaScript widgets, and backing load-bearing numbers with re-runnable
+evidence (` + "`{{< val >}}`" + ` / ` + "`{{< data >}}`" + ` / ` + "`{{< claim >}}`" + `). Run
+` + "`starbase templates %[2]s`" + ` to list every shortcode and its arguments.
 
 ## Upgrades
 
@@ -175,7 +184,7 @@ jobs:
         run: go install github.com/monoptic-io/starbase/cmd/starbase@latest
 
       - name: Build site
-        run: starbase build . -o _site -title %[1]q -strict
+        run: starbase build %[2]s -o _site -title %[1]q -strict
 
       - run: touch _site/.nojekyll
       - uses: actions/configure-pages@v5
