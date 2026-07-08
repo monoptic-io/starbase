@@ -6,6 +6,7 @@ package render
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html"
 	"html/template"
@@ -491,15 +492,51 @@ func (r *Renderer) renderData(t *model.Topic, sc model.Shortcode, page tmpl.Page
 		return template.HTML(`<div class="sg-data" data-check="` + name + `">` +
 			rowsTableHTML(claim.Rows(strings.TrimSpace(cr.Output), "csv")) + `</div>`), nil
 	case "bar", "line", "scatter":
-		chart := model.Shortcode{Name: "chart", Line: sc.Line, Args: map[string]string{
-			"type": as, "data": csvToPairs(cr.Output), "height": firstArg(sc.Args["height"], "300"),
-			"title": sc.Args["title"], "caption": sc.Args["caption"],
-			"xlabel": sc.Args["xlabel"], "ylabel": sc.Args["ylabel"], "labels": sc.Args["labels"],
-		}}
-		return r.eng.Render(chart, "", "", page, id, t.SourcePath)
+		// Convenience aliases: all three are the built-in chart template with type set.
+		return r.renderDataVia(t, "chart", cr, sc, page, id, map[string]string{"type": as})
 	default:
-		return valErr("[data: bad as]"), evDiag(t, sc, fmt.Sprintf("data: unknown as=%q (use table, bar, line, or scatter)", as))
+		// Any other as= names a template — built-in or a project templates/<name>.html.
+		// The check's output feeds that template, so a project can render a check as
+		// arbitrary HTML/JS (a KPI card, a custom widget) exactly like chart/sketch do.
+		if r.eng.Has(as) {
+			return r.renderDataVia(t, as, cr, sc, page, id, nil)
+		}
+		return valErr("[data: bad as]"), evDiag(t, sc, fmt.Sprintf("data: unknown as=%q (use table, bar, line, scatter, or the name of a template)", as))
 	}
+}
+
+// renderDataVia feeds a check's output into a named template. It forwards the
+// data shortcode's own args (minus check/as) and exposes the check's stdout to
+// the template four ways: raw via .InnerRaw, the trimmed scalar via .value, a
+// chart-friendly "label:value" string via .data, and the parsed table as a JSON
+// literal via .rows (so a JS template can `const data = {{ .rows }}`). This is
+// the general bridge — any template can render any check.
+func (r *Renderer) renderDataVia(t *model.Topic, name string, cr CheckResult, sc model.Shortcode, page tmpl.PageContext, id string, overrides map[string]string) (template.HTML, []model.Diagnostic) {
+	args := map[string]string{}
+	for k, v := range sc.Args {
+		if k == "check" || k == "as" {
+			continue
+		}
+		args[k] = v
+	}
+	// Inject each convenience key only if the target template consumes it, so a
+	// template that declares just .value isn't warned about an unused .data/.rows.
+	if _, ok := args["value"]; !ok && r.eng.Accepts(name, "value") {
+		args["value"] = strings.TrimSpace(cr.Output)
+	}
+	if _, ok := args["data"]; !ok && r.eng.Accepts(name, "data") {
+		args["data"] = csvToPairs(cr.Output)
+	}
+	if _, ok := args["rows"]; !ok && r.eng.Accepts(name, "rows") {
+		if b, err := json.Marshal(claim.Rows(strings.TrimSpace(cr.Output), "csv")); err == nil {
+			args["rows"] = string(b)
+		}
+	}
+	for k, v := range overrides {
+		args[k] = v
+	}
+	sc2 := model.Shortcode{Name: name, Line: sc.Line, Args: args}
+	return r.eng.Render(sc2, "", cr.Output, page, id, t.SourcePath)
 }
 
 // lookupCheck resolves the check= argument, returning a human message on failure.
@@ -544,15 +581,6 @@ func csvToPairs(out string) string {
 		pairs = append(pairs, strings.TrimSpace(row[0])+":"+strings.TrimSpace(row[len(row)-1]))
 	}
 	return strings.Join(pairs, ", ")
-}
-
-func firstArg(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func evFirstLine(s string) string {

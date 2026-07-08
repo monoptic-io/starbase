@@ -70,6 +70,20 @@ func (e *Engine) Names() []string {
 // Has reports whether a template is registered.
 func (e *Engine) Has(name string) bool { _, ok := e.defs[name]; return ok }
 
+// Accepts reports whether a template will consume an argument of the given name
+// without warning — either it declares the param or it is an open template.
+func (e *Engine) Accepts(name, param string) bool {
+	d, ok := e.defs[name]
+	if !ok {
+		return false
+	}
+	if d.Open {
+		return true
+	}
+	_, declared := d.Params[param]
+	return declared
+}
+
 // RawInner reports whether a template's inner block is opaque (not markdown).
 func (e *Engine) RawInner(name string) bool {
 	d, ok := e.defs[name]

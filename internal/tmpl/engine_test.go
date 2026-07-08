@@ -42,6 +42,25 @@ func TestUnknownTemplateAndArg(t *testing.T) {
 	}
 }
 
+func TestAccepts(t *testing.T) {
+	e := newEngine(t, "kpi", `{{/* @param value required */}}{{/* @param label default="" */}}x`)
+	if err := e.register("wild", `{{/* @params open */}}y`); err != nil {
+		t.Fatal(err)
+	}
+	if !e.Accepts("kpi", "value") {
+		t.Error("declared param should be accepted")
+	}
+	if e.Accepts("kpi", "rows") {
+		t.Error("undeclared param on a closed template should not be accepted")
+	}
+	if !e.Accepts("wild", "anything") {
+		t.Error("open template should accept any param")
+	}
+	if e.Accepts("missing", "value") {
+		t.Error("unknown template accepts nothing")
+	}
+}
+
 func TestOpenParamsSuppressesUnknownArgWarning(t *testing.T) {
 	e := newEngine(t, "sim", `{{/* @params open */}}{{/* @param name required */}}x`)
 	d := e.Validate(model.Shortcode{Name: "sim", Args: map[string]string{"name": "p", "length": "2"}}, "f.md")

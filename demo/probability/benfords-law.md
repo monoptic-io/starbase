@@ -56,6 +56,8 @@ END { split("0.301 0.176 0.125 0.097 0.079 0.067 0.058 0.051 0.046", b, " ")
 
 The single most visible signature of the law is the dominance of the digit 1:
 
+{{< data check="benford-digit-one" as="kpi" label="of figures lead with digit 1" caption="computed by evidence/benford-digit-one" >}}
+
 {{< claim check="benford-digit-one" source="data/world-figures.csv" asof="2026-06-30" >}}
 About **{{< val check="benford-digit-one" >}}** of the figures begin with the digit 1, almost exactly Benford's predicted $\log_{10} 2 = 30.1\%$ and nearly triple the **11.1%** a "uniform" guess would give.
 ```sh

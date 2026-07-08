@@ -40,6 +40,19 @@ The Midwest is served by {{< val check="midwest-regions" >}} regions.
 - `{{< data check="X" as="table|bar|line|scatter" >}}` renders the check's CSV
   stdout as a **table** (default) or a **chart** — reusing the chart runtime, so a
   figure's data is the verified computation, never a transcription.
+- **`as=` names *any* template, not just those four.** `data` is the general
+  bridge from a check to a template: `as="<name>"` dispatches to any built-in or
+  project `templates/<name>.html`, so you can render a check as arbitrary HTML/JS
+  (a KPI card, a custom widget) exactly like `chart`/`sketch` do. The check's
+  output arrives in the template context four ways — pick whichever the template
+  needs: `.value` (trimmed scalar), `.InnerRaw` (raw stdout), `.data`
+  (chart-shaped `label:value` string), and `.rows` (the parsed table as a JSON
+  literal, for `const data = {{ .rows }}` in a `<script>`). Other args on the
+  shortcode (`title`, `label`, …) forward to the template. A convenience key is
+  injected only if the template declares that param, so a card template that
+  wants just `.value` isn't warned about the rest. Example — a project drops
+  `templates/kpi.html` (see `demo/templates/kpi.html`) and writes `{{< data
+  check="benford-digit-one" as="kpi" label="lead with digit 1" >}}`.
 - A missing `check=` is an error; a reference to a non-existent `evidence/<X>/run`
   is a warning (like a dead link); a check that *fails* breaks the build.
 - The page re-renders automatically when the check's output changes, even if the

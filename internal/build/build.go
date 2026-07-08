@@ -149,6 +149,9 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 				diags = append(diags, claim.Validate(claim.Parse(sc), t.SourcePath, sc.Line)...)
 			case "val", "data":
 				diags = append(diags, validateEvidenceRef(cfg, sc, t.SourcePath)...)
+				if sc.Name == "data" {
+					diags = append(diags, validateDataAs(eng, sc, t.SourcePath)...)
+				}
 			default:
 				diags = append(diags, eng.Validate(sc, t.SourcePath)...)
 			}
@@ -483,6 +486,23 @@ func validateEvidenceRef(cfg Config, sc model.Shortcode, file string) []model.Di
 			Message: fmt.Sprintf("%s references evidence check %q, but evidence/%s/run does not exist", sc.Name, name, name)}}
 	}
 	return nil
+}
+
+// validateDataAs checks that a data shortcode's as= names something renderable:
+// a built-in shape (table/bar/line/scatter) or a known template. It does not
+// execute the check — it only catches a typo'd or missing template at check time,
+// the way eng.Validate catches an unknown template invocation.
+func validateDataAs(eng *tmpl.Engine, sc model.Shortcode, file string) []model.Diagnostic {
+	as := strings.ToLower(strings.TrimSpace(sc.Args["as"]))
+	switch as {
+	case "", "table", "bar", "line", "scatter":
+		return nil
+	}
+	if eng.Has(as) {
+		return nil
+	}
+	return []model.Diagnostic{{Severity: model.SevError, File: file, Line: sc.Line,
+		Message: fmt.Sprintf("data: as=%q is not a built-in shape or a known template", as)}}
 }
 
 // evidenceHash folds the outputs of the checks a page references into its

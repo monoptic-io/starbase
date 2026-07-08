@@ -1,0 +1,16 @@
+{{/* @param value required */}}
+{{/* @param label default="" */}}
+{{/* @param caption default="" */}}
+{{/* A stat card rendered from an evidence check's output. Invoked as
+     {{< data check="X" as="kpi" label="..." >}} — the check's trimmed stdout
+     arrives as .value, so nothing is transcribed. Proof that `as=` dispatches
+     to any template, not just the built-in chart/table. */}}
+<figure data-widget="kpi" style="display:inline-flex;flex-direction:column;gap:.15rem;
+    padding:.7rem 1.1rem;margin:1rem 0;border:1px solid var(--border,#2a2f3a);
+    border-left:3px solid var(--accent,#5b9cff);border-radius:8px;
+    background:var(--accent-soft,rgba(91,156,255,.12));min-width:6rem;">
+  <div style="font-size:1.9rem;font-weight:700;line-height:1;color:var(--accent,#5b9cff);
+      font-variant-numeric:tabular-nums;">{{ .value }}</div>
+  {{ if .label }}<div style="font-size:.8rem;opacity:.85;">{{ .label }}</div>{{ end }}
+  {{ if .caption }}<figcaption style="font-size:.72rem;opacity:.6;margin-top:.25rem;">{{ .caption }}</figcaption>{{ end }}
+</figure>
