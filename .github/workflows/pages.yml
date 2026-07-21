@@ -29,7 +29,7 @@ jobs:
           cache: true
 
       - name: Build demo site
-        run: go run ./cmd/starbase build demo -o _site -title "Systems, Signals & Computation" -strict
+        run: go run ./cmd/starbase build demo -trust -o _site -title "Systems, Signals & Computation" -strict
 
       - name: Disable Jekyll processing
         run: touch _site/.nojekyll

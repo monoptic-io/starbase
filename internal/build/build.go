@@ -39,21 +39,23 @@ type Config struct {
 	BaseURL    string
 	Drafts     bool
 	Force      bool // ignore cache, rebuild everything
+	Trust      bool // never execute evidence checks: require committed attestations
 	Vendor     bool // download + bundle third-party assets locally instead of linking a CDN
 	Offline    bool // with Vendor, use only cached downloads (never hit the network)
 }
 
 type Result struct {
-	Topics      int
-	Rendered    int
-	Skipped     int
-	Verified    int             // claims re-executed and matched
-	Attested    int             // claims with evidence attached but no re-runnable check
-	UnitsRun    int             // evidence units executed this run
-	UnitsCached int             // evidence units served from cache (inputs unchanged)
-	Units       []evidence.Unit // per-check status (for -v)
-	Claims      []ClaimStatus   // per-claim outcome (for -v)
-	Diagnostics []model.Diagnostic
+	Topics       int
+	Rendered     int
+	Skipped      int
+	Verified     int             // claims re-executed and matched
+	Attested     int             // claims with evidence attached but no re-runnable check
+	UnitsRun     int             // evidence units executed this run
+	UnitsCached  int             // evidence units served from cache (inputs unchanged)
+	UnitsTrusted int             // evidence units served from committed attestations
+	Units        []evidence.Unit // per-check status (for -v)
+	Claims       []ClaimStatus   // per-claim outcome (for -v)
+	Diagnostics  []model.Diagnostic
 }
 
 // ClaimStatus is one claim's verification outcome, for the verbose listing.
@@ -68,7 +70,7 @@ type ClaimStatus struct {
 // for capturing into a claim's result block. It reuses the cache (a check re-runs
 // only if its inputs changed), so it's cheap to call in an authoring loop.
 func ShowCheck(cfg Config, name string) (string, error) {
-	rr, present, err := evidence.Run(cfg.ContentDir, false)
+	rr, present, err := evidence.Run(cfg.ContentDir, evidence.Options{})
 	if err != nil {
 		return "", err
 	}
@@ -185,7 +187,7 @@ func Verify(cfg Config) (Result, error) {
 	}
 	res := Result{Topics: len(topics), Diagnostics: diags}
 
-	rr, present, rerr := evidence.Run(cfg.ContentDir, cfg.Force)
+	rr, present, rerr := evidence.Run(cfg.ContentDir, evidence.Options{Force: cfg.Force, Trust: cfg.Trust})
 	if rerr != nil {
 		res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
 			Severity: model.SevError, File: "evidence", Message: rerr.Error()})
@@ -200,6 +202,8 @@ func Verify(cfg Config) (Result, error) {
 				Message: fmt.Sprintf("check failed: %s", firstLine(u.Err))})
 		} else if u.Cached {
 			res.UnitsCached++
+		} else if u.Trusted {
+			res.UnitsTrusted++
 		} else {
 			res.UnitsRun++
 		}
@@ -350,6 +354,35 @@ func oneLine(s string) string {
 	return s
 }
 
+// LabelRow is one (label, topic) pair for the `starbase labels` worklist.
+type LabelRow struct {
+	Label string
+	File  string // source path relative to the content dir
+	Title string
+}
+
+// Labels lists every labeled topic, sorted by label then title — the worklist
+// behind conventions like `open-problem`.
+func Labels(cfg Config) ([]LabelRow, error) {
+	topics, _, _, _, err := index(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var rows []LabelRow
+	for _, t := range topics {
+		for _, l := range t.Labels {
+			rows = append(rows, LabelRow{Label: l, File: t.SourcePath, Title: t.Title})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Label != rows[j].Label {
+			return rows[i].Label < rows[j].Label
+		}
+		return rows[i].Title < rows[j].Title
+	})
+	return rows, nil
+}
+
 // Check performs fast validation only.
 func Check(cfg Config) (Result, error) {
 	topics, _, _, diags, err := index(cfg)
@@ -400,7 +433,7 @@ func Build(cfg Config) (Result, error) {
 
 	// Build injects computed values (val/data shortcodes), so it depends on the
 	// evidence checks — cached, so it stays cheap in an authoring loop.
-	rr, _, evErr := evidence.Run(cfg.ContentDir, cfg.Force)
+	rr, _, evErr := evidence.Run(cfg.ContentDir, evidence.Options{Force: cfg.Force, Trust: cfg.Trust})
 	if evErr != nil {
 		res.Diagnostics = append(res.Diagnostics, model.Diagnostic{
 			Severity: model.SevWarn, File: "evidence", Message: evErr.Error()})
@@ -664,6 +697,45 @@ func buildListings(rd *render.Renderer, topics []*model.Topic, bySlug map[string
 		pages = append(pages, listingPage{
 			title: humanizeSeg(path.Base(dir)), slug: dir, out: dir + "/index.html",
 			intro: "", cards: cards, fingerprint: fp.String(),
+		})
+	}
+
+	// Label pages: one worklist page per label (e.g. labels/open-problem.html),
+	// plus an index. Labels are workflow markers, so the listing is the reader-
+	// facing form of the `starbase labels` worklist.
+	labelTopics := map[string][]*model.Topic{}
+	for _, t := range topics {
+		for _, l := range t.Labels {
+			labelTopics[l] = append(labelTopics[l], t)
+		}
+	}
+	if len(labelTopics) > 0 {
+		var idxCards []render.Card
+		var idxFP strings.Builder
+		labels := make([]string, 0, len(labelTopics))
+		for l := range labelTopics {
+			labels = append(labels, l)
+		}
+		sort.Strings(labels)
+		for _, l := range labels {
+			slug := parse.Slugify(l)
+			var cards []render.Card
+			var fp strings.Builder
+			for _, t := range sortedTopics(labelTopics[l]) {
+				cards = append(cards, card(t))
+				fp.WriteString(t.OutPath + t.Title + ";")
+			}
+			pages = append(pages, listingPage{
+				title: "⚑ " + l, slug: "labels/" + slug, out: "labels/" + slug + ".html",
+				intro: fmt.Sprintf("Topics labeled %q.", l), cards: cards, fingerprint: fp.String(),
+			})
+			idxCards = append(idxCards, render.Card{Title: "⚑ " + l, URL: slug + ".html",
+				Summary: fmt.Sprintf("%d topics", len(labelTopics[l]))})
+			idxFP.WriteString(l + fmt.Sprint(len(labelTopics[l])) + ";")
+		}
+		pages = append(pages, listingPage{
+			title: "Labels", slug: "labels", out: "labels/index.html",
+			intro: "All labels.", cards: idxCards, fingerprint: idxFP.String(),
 		})
 	}
 

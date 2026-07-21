@@ -1,0 +1,10 @@
+{
+  "midwest-regions": {
+    "key": "1fe0c4d82e20ef9f1d61f96f88c0db5905a89bc9d2f6f87f92ed00327666ae71",
+    "output": "4\n"
+  },
+  "revenue-by-division": {
+    "key": "940e650db5851a83b16ddeeb04025d2f586a4f94160272f0cb06f979b064671e",
+    "output": "division,total\nMidwest,11400000\nNortheast,9000000\nWest,8000000\nSouth,7900000\n"
+  }
+}

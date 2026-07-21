@@ -14,7 +14,8 @@ type Topic struct {
 	Title      string // display title
 	Aliases    []string
 	Tags       []string
-	Summary    string // short description (frontmatter or first paragraph)
+	Labels     []string // workflow markers (e.g. "open-problem"), surfaced as worklists
+	Summary    string   // short description (frontmatter or first paragraph)
 	Draft      bool
 	Weight     int // sort hint within a section
 

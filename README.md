@@ -31,6 +31,8 @@ go build -o starbase ./cmd/starbase
 ```sh
 starbase check <dir>                 # fast validation: dead links + bad template calls
 starbase verify <dir>                # re-run the evidence/ checks, diff every checked claim
+starbase verify <dir> -trust         # CI mode: execute nothing, require committed attestations
+starbase labels <dir>                # list labeled topics (open-problem, stub, …) as a worklist
 starbase build <dir> -o _site \      # full incremental render
         -title "My KB"
 starbase templates [dir]             # list embedded templates and their arguments
@@ -46,8 +48,15 @@ Exit code is non-zero if there are errors (or, with `-strict`, warnings).
 ## Authoring model
 
 - **One markdown file = one topic**, in folders of any depth (folders become
-  sidebar sections). Frontmatter sets `title`, `aliases`, `tags`, `summary`,
-  `weight`, `draft`.
+  sidebar sections). Frontmatter sets `title`, `aliases`, `tags`, `labels`,
+  `summary`, `weight`, `draft`.
+- **Labels** are workflow markers, orthogonal to tags: `labels: [open-problem]`
+  puts a page on a worklist. `starbase labels` prints every `label → topic`
+  pair (the agent-facing view), the build emits a `labels/<label>.html` listing
+  per label (the reader-facing view), and labeled pages get a ⚑ chip. Any name
+  works — `open-problem`, `stub`, `needs-evidence`, `speculative` are the
+  conventions the `labels` skill teaches, so a KB's frontier (open questions,
+  low-hanging fruit) is enumerable rather than folklore.
 - **Wiki links**: `[[Topic Name]]`, `[[Name|display]]`, `[[Name#section]]`.
   Resolved by title/alias/filename. Unresolved links are warnings (your
   worklist) and render in red.
@@ -120,10 +129,23 @@ Verification is **incremental like `go test`**: each check is cached keyed by a
 hash of its `run` script, its `inputs` manifest, and the resolved content of every
 input, so a minutes-long check re-runs only when one of those changes — never when
 you edit an unrelated page. Fetched URLs are treated as immutable between builds
-(a local verify reuses the cached bytes); the cache is a local convenience, and CI
-starts cold, so the **output comparison** — not input pinning — is what catches a
-source that has drifted. Caching is by **content, not mtime** (`touch` won't
-re-run a check). Claims sort into **unsupported → attested → verified**.
+(a local verify reuses the cached bytes). Caching is by **content, not mtime**
+(`touch` won't re-run a check). Claims sort into **unsupported → attested →
+verified**.
+
+**Attestations: run checks on your machine, gate CI cheaply.** Every successful
+execution is recorded in `evidence/attestations.json` — the check's content key
+(run script + inputs manifest + every input's resolved bytes) and its output.
+Commit that file. It serves as a second-level cache (a fresh clone doesn't re-run
+unchanged checks), and it powers **trust mode**: `starbase verify -trust` (and
+`build -trust`) execute nothing, requiring a current attestation for every check
+and failing — with instructions to re-verify locally — on any check whose script
+or input content has changed since the last local run. So expensive checks run
+only where you author, while CI still catches drift: trust mode re-resolves and
+hashes every input, so edited code, changed local data, or a drifted remote
+source all invalidate the key. This keeps an honest agent honest (a fabricated
+output can't survive a local `verify`, and stale attestations can't survive CI)
+without needing CI to afford the computation.
 
 **Injection, not transcription.** Rather than the agent copying a value into the
 page (and `verify` catching mismatches), the page can reference a check and let
@@ -161,8 +183,8 @@ starbase build site -o _site --vendor --offline   # cache only, no network
 
 - **ci.yml** (pull requests): builds, vets, tests, runs `starbase check demo
   -strict` (validating links and template calls *without* rendering), and
-  `starbase verify examples/sales-research` (re-running the evidence checks to
-  confirm every checked claim still matches the data).
+  `starbase verify -trust` on the demo and example (validating every checked
+  claim against committed attestations without executing any check).
 - **pages.yml** (push to `main`): renders the demo and publishes it to GitHub
   Pages.
 
@@ -186,7 +208,7 @@ The `internal/` packages are small and single-purpose
 ## Skills
 
 Agent-facing authoring guides — `starbase-authoring`, `interactive-content`,
-`flesh-out-subject`, and `research-claims` — are **embedded in the binary**
+`flesh-out-subject`, `research-claims`, and `labels` — are **embedded in the binary**
 (source in `internal/assets/skills/`) and version-locked to it. They are planted
 into a KB repo's `.claude/skills/`, where Claude Code discovers them
 automatically:

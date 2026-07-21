@@ -50,6 +50,11 @@ A good topic page:
 Set `summary`, `tags`, and `aliases` in frontmatter so related-topic cards and
 tag pages read well.
 
+A mature subject has a **frontier**: genuinely open questions and obvious
+next steps. Give each its own page and mark it with `labels: [open-problem]`
+(or `low-hanging-fruit`) — see the **labels** skill. `starbase labels <dir>`
+then enumerates the subject's research agenda alongside the dead-link worklist.
+
 ## 4. Converge to zero diagnostics
 
 Iterate the loop until clean:

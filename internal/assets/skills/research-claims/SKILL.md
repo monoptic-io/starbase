@@ -195,21 +195,46 @@ each check as `ran`/`cached` and each claim as `verified`/`attested`/`failed`, s
 
 **One expensive check per directory** so a minutes-long run isn't re-run when you
 touch something else. A fetched URL is treated as immutable between builds — a
-local `verify` reuses the cached bytes rather than re-fetching. That's safe
-because the cache is only a local convenience: CI starts cold, re-fetches, and the
-**output comparison** catches any source that has drifted. So you don't pin URLs;
-you let the build fail when the recomputed output stops matching the article.
+local `verify` reuses the cached bytes rather than re-fetching.
+
+### Attestations: run locally, gate CI cheaply
+
+Every successful execution is recorded in **`evidence/attestations.json`** —
+each check's content key (a hash of `run`, the `inputs` manifest, and every
+input's resolved bytes) plus its output. **Commit this file.** It is written
+automatically by `verify` (and `build`); you never edit it by hand.
+
+Attestations do two jobs:
+
+- **Second-level cache**: a fresh clone (or a wiped cache) reuses attested
+  outputs instead of re-running unchanged checks — `verify -v` shows them as
+  `trusted`.
+- **Trust mode**: `starbase verify -trust <dir>` *executes nothing*. Every
+  check must have an attestation whose key still matches; a check whose `run`
+  script or input content has changed since the last local verify **fails**
+  with instructions to re-verify locally. This is the CI mode: expensive
+  checks run only on the author's machine, while CI still catches any drift —
+  editing a check, changing data, or hand-editing the attestation file all
+  invalidate the key. (Trust mode still resolves inputs to hash them, so a
+  drifted remote source also fails in CI.)
+
+The workflow: `starbase verify <dir>` locally until green, commit
+`evidence/attestations.json` with your content changes, and have CI run
+`starbase verify -trust <dir>` (and `build -trust` if pages inject values).
+Forgetting to commit a refreshed attestation is caught, not silently skipped.
 
 ```sh
-starbase verify <dir>             # re-runs only changed checks; diffs every checked claim
-starbase verify <dir> -v          # + list every check (ran/cached) and claim outcome
+starbase verify <dir>             # re-runs only changed checks; refreshes attestations
+starbase verify <dir> -v          # + list every check (ran/cached/trusted) and claim outcome
 starbase verify <dir> -show <chk>  # print a check's exact stdout (to copy into a result block)
-starbase verify <dir> -force      # ignore the cache, re-fetch URLs, re-run everything
+starbase verify <dir> -force      # ignore cache + attestations, re-fetch URLs, re-run everything
+starbase verify <dir> -trust      # CI mode: execute nothing, require current attestations
 ```
 
-Wire `verify` into CI. A claim with a `check` that re-executes and matches is
-**verified**; one with only a pasted result is **attested**; one with neither is
-**unsupported**. Aim to make load-bearing numbers verified.
+Wire `verify -trust` into CI. A claim with a `check` that re-executes (or
+attests) and matches is **verified**; one with only a pasted result is
+**attested**; one with neither is **unsupported**. Aim to make load-bearing
+numbers verified.
 
 ## The validation loop (this is the point)
 

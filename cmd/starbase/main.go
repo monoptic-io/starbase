@@ -33,6 +33,8 @@ func main() {
 		os.Exit(runCheck(os.Args[2:]))
 	case "verify":
 		os.Exit(runVerify(os.Args[2:]))
+	case "labels":
+		os.Exit(runLabels(os.Args[2:]))
 	case "templates":
 		os.Exit(runTemplates(os.Args[2:]))
 	case "init":
@@ -60,6 +62,13 @@ Commands:
                         embedded result against the freshly computed output.
                         -v lists each check/claim; -show <check> prints a
                         check's raw stdout to copy into its result block.
+                        Successful runs are recorded in evidence/attestations.json
+                        (commit it); -trust executes nothing and instead requires
+                        a current attestation for every check — for CI, so
+                        expensive checks run only on the author's machine.
+  labels <content-dir>  List labeled topics (frontmatter "labels:"), one line per
+                        label/topic pair — the worklist view. -label <name>
+                        filters to one label (e.g. -label open-problem).
   templates [dir]       List available shortcode templates and their arguments.
   init [dir]            Scaffold a new KB repo (starter topics, Pages workflow,
                         CLAUDE.md, and the authoring skills in .claude/skills/).
@@ -113,6 +122,7 @@ func runBuild(args []string) int {
 	quiet := fs.Bool("quiet", false, "only print diagnostics and summary")
 	vendorAssets := fs.Bool("vendor", false, "download and bundle third-party assets (e.g. KaTeX) locally for a self-contained, offline site instead of linking a CDN")
 	offline := fs.Bool("offline", false, "with -vendor, use only previously cached downloads (never hit the network)")
+	trust := fs.Bool("trust", false, "never execute evidence checks: injected values (val/data) come only from committed attestations")
 	fs.Parse(reorder(args))
 
 	cfg := build.Config{
@@ -122,6 +132,7 @@ func runBuild(args []string) int {
 		BaseURL:    *baseURL,
 		Drafts:     *drafts,
 		Force:      *force,
+		Trust:      *trust,
 		Vendor:     *vendorAssets,
 		Offline:    *offline,
 	}
@@ -170,6 +181,7 @@ func reorder(args []string) []string {
 	valueFlags := map[string]bool{
 		"-o": true, "--o": true, "-title": true, "--title": true,
 		"-base": true, "--base": true, "-show": true, "--show": true,
+		"-label": true, "--label": true,
 	}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
@@ -190,12 +202,13 @@ func reorder(args []string) []string {
 func runVerify(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	drafts := fs.Bool("drafts", false, "include draft topics")
-	force := fs.Bool("force", false, "re-run all evidence units, ignoring the cache")
+	force := fs.Bool("force", false, "re-run all evidence units, ignoring the cache and attestations")
+	trust := fs.Bool("trust", false, "execute nothing: require a current committed attestation for every check")
 	verbose := fs.Bool("v", false, "list each evidence check and claim outcome")
 	show := fs.String("show", "", "print one check's raw stdout (to copy into a result block) and exit")
 	fs.Parse(reorder(args))
 
-	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, Force: *force, OutDir: "_site"}
+	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, Force: *force, Trust: *trust, OutDir: "_site"}
 
 	// -show: capture a check's output for pasting into its claim's result block.
 	if *show != "" {
@@ -221,6 +234,8 @@ func runVerify(args []string) int {
 				state = "FAILED"
 			} else if u.Cached {
 				state = "cached"
+			} else if u.Trusted {
+				state = "trusted"
 			}
 			fmt.Printf("  check %-28s %s\n", u.Name, state)
 		}
@@ -232,11 +247,43 @@ func runVerify(args []string) int {
 			fmt.Printf("  claim %-28s %s (%s)\n", c.Check, c.State, where)
 		}
 	}
-	fmt.Printf("evidence: %d unit(s) run, %d cached\n", res.UnitsRun, res.UnitsCached)
+	fmt.Printf("evidence: %d unit(s) run, %d cached, %d trusted\n", res.UnitsRun, res.UnitsCached, res.UnitsTrusted)
 	fmt.Printf("verified %d claim(s), %d attested (not re-run): %d error(s)\n",
 		res.Verified, res.Attested, res.Errors())
 	if res.Errors() > 0 {
 		return 1
+	}
+	return 0
+}
+
+// runLabels lists labeled topics as tab-separated `label  file  title` lines —
+// the machine-readable worklist behind conventions like `open-problem`.
+func runLabels(args []string) int {
+	fs := flag.NewFlagSet("labels", flag.ExitOnError)
+	drafts := fs.Bool("drafts", false, "include draft topics")
+	only := fs.String("label", "", "show only topics with this label")
+	fs.Parse(reorder(args))
+
+	cfg := build.Config{ContentDir: contentDir(fs), Drafts: *drafts, OutDir: "_site"}
+	rows, err := build.Labels(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "starbase: %v\n", err)
+		return 1
+	}
+	n := 0
+	for _, r := range rows {
+		if *only != "" && r.Label != *only {
+			continue
+		}
+		fmt.Printf("%s\t%s\t%s\n", r.Label, r.File, r.Title)
+		n++
+	}
+	if n == 0 {
+		if *only != "" {
+			fmt.Fprintf(os.Stderr, "no topics labeled %q (frontmatter: labels: [%s])\n", *only, *only)
+		} else {
+			fmt.Fprintln(os.Stderr, "no labeled topics (add `labels: [open-problem]` to a topic's frontmatter)")
+		}
 	}
 	return 0
 }

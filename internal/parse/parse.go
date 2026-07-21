@@ -237,6 +237,7 @@ func applyFrontmatter(t *model.Topic, meta map[string]any) {
 	t.Summary = first(str(meta["summary"]), str(meta["description"]))
 	t.Aliases = strList(meta["aliases"], meta["alias"])
 	t.Tags = strList(meta["tags"], meta["tag"])
+	t.Labels = strList(meta["labels"], meta["label"])
 	if d, ok := meta["draft"].(bool); ok {
 		t.Draft = d
 	}

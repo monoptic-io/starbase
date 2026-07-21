@@ -141,6 +141,7 @@ a:hover { text-decoration: underline; }
 .sg-tag { background: var(--bg-elev2); padding: 0.1rem 0.5rem; border-radius: 999px;
   color: var(--text-dim); font-size: 0.76rem; }
 .sg-tag:hover { text-decoration: none; color: var(--accent); }
+.sg-label { outline: 1px dashed var(--text-faint); outline-offset: -1px; }
 .sg-summary { font-size: 1.1rem; color: var(--text-dim); margin: 0 0 1.5rem;
   font-family: var(--serif); font-style: italic; }
 

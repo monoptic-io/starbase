@@ -1,0 +1,26 @@
+{
+  "anscombe-correlation": {
+    "key": "3d0567fa257e90b22c85942697c48908c4480ae1e69cc89b8dd3838819049f88",
+    "output": "0.82\n"
+  },
+  "anscombe-summary": {
+    "key": "27a6a2f387cacf86a4cb6e68c995ef53810441dcf577cb4ad9eac3ad470550e1",
+    "output": "set  mean_x  mean_y  var_x  var_y   corr  slope  intercept\n  1    9.00    7.50  11.00   4.13  0.816   0.50       3.00\n  2    9.00    7.50  11.00   4.13  0.816   0.50       3.00\n  3    9.00    7.50  11.00   4.12  0.816   0.50       3.00\n  4    9.00    7.50  11.00   4.12  0.817   0.50       3.00\n"
+  },
+  "benford-digit-one": {
+    "key": "f0edde4eb88c7e3b9081ab6fedb319309dbe55e3663d9673bd0222fa7db0288f",
+    "output": "29.1%\n"
+  },
+  "benford-leading-digits": {
+    "key": "677211587eba40ef32f1bdcc3ed17ceadca35eade3378225bd62a38deb5b5f53",
+    "output": "digit  count  observed  benford\n1         85     29.1%    30.1%\n2         53     18.2%    17.6%\n3         37     12.7%    12.5%\n4         25      8.6%     9.7%\n5         26      8.9%     7.9%\n6         23      7.9%     6.7%\n7         12      4.1%     5.8%\n8         16      5.5%     5.1%\n9         15      5.1%     4.6%\nN=292  chi2=3.22  maxdev=1.7%\n"
+  },
+  "feigenbaum-accumulation": {
+    "key": "d942329b8502a1174b3b88293cc95e971e1cb3f8ea2c413b201d2ef770ae9dce",
+    "output": "b5 (period 16 -\u003e 32) = 3.5687594195\nb6 (period 32 -\u003e 64) = 3.5696916098\nlast gap b6-b5       = 0.0009321903\ngeometric tail / delta = 0.0002540581\naccumulation r_inf   = 3.56995  (true 3.5699456...)\n"
+  },
+  "feigenbaum-delta": {
+    "key": "c5d239e13b818915558c0d79c1e14dee80445b6dfc7afe9afe14a8df0c661455",
+    "output": "n  period  r_n (bifurcation)      gap             delta_n\n1       1  3.0000000000                            \n2       2  3.4494897428    0.4494897428            \n3       4  3.5440903596    0.0946006168     4.75145\n4       8  3.5644072661    0.0203169065     4.65625\n5      16  3.5687594195    0.0043521534     4.66824\n6      32  3.5696916098    0.0009321903     4.66874\nbest ratio delta_5 = 4.66874  -\u003e  delta ~ 4.669  (Feigenbaum 4.6692016...)\n"
+  }
+}

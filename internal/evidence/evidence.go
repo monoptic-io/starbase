@@ -18,8 +18,17 @@
 //
 // It is incremental: each check is a cache unit keyed by a hash of its `run`
 // script, its `inputs` manifest, and the resolved content of every input. A check
-// re-runs only when one of those changes. The cache lives in the user cache dir,
-// so CI starts cold and is authoritative.
+// re-runs only when one of those changes. The cache lives in the user cache dir.
+//
+// Executed results are also recorded in `evidence/attestations.json`, a
+// repo-committed file mapping each check to its content key and output. An
+// attestation whose key still matches serves as a second-level cache (a fresh
+// clone does not re-run anything unchanged), and Trust mode executes nothing at
+// all: a check either has a matching attestation or fails with instructions to
+// re-verify locally. That lets expensive checks run on the author's machine
+// while CI stays cheap — and because the key covers the run script and every
+// input's resolved content, an attestation goes stale the moment the data or
+// code drifts.
 package evidence
 
 import (
@@ -46,9 +55,16 @@ type Check struct {
 
 // Unit reports how one check was resolved this run.
 type Unit struct {
-	Name   string
-	Cached bool
-	Err    string
+	Name    string
+	Cached  bool // served from the local cache
+	Trusted bool // served from a committed attestation (not executed here)
+	Err     string
+}
+
+// Options controls a Run.
+type Options struct {
+	Force bool // ignore the cache and attestations; re-run everything
+	Trust bool // never execute: require a matching attestation for every check
 }
 
 // Result is every check's output plus per-check status.
@@ -59,9 +75,10 @@ type Result struct {
 
 const perRunTimeout = 20 * time.Minute
 
-// Run resolves every check under evidence/, reusing cached output whose inputs
-// are unchanged and re-running the rest. The bool reports whether evidence exists.
-func Run(contentDir string, force bool) (Result, bool, error) {
+// Run resolves every check under evidence/, reusing cached or attested output
+// whose inputs are unchanged and re-running the rest (in Trust mode, nothing is
+// ever executed). The bool reports whether evidence exists.
+func Run(contentDir string, opts Options) (Result, bool, error) {
 	evDir := filepath.Join(contentDir, "evidence")
 	if fi, err := os.Stat(evDir); err != nil || !fi.IsDir() {
 		return Result{}, false, nil
@@ -72,10 +89,12 @@ func Run(contentDir string, force bool) (Result, bool, error) {
 	}
 
 	cache := loadCache(contentDir)
+	atts := loadAttestations(contentDir)
+	fresh := map[string]attestation{} // rebuilt each run, so removed checks are pruned
 	res := Result{Checks: map[string]Check{}}
-	record := func(name string, ck Check, cached bool) {
+	record := func(name string, ck Check, cached, trusted bool) {
 		res.Checks[name] = ck
-		res.Units = append(res.Units, Unit{Name: name, Cached: cached, Err: ck.Err})
+		res.Units = append(res.Units, Unit{Name: name, Cached: cached, Trusted: trusted, Err: ck.Err})
 	}
 
 	for _, e := range entries {
@@ -88,36 +107,66 @@ func Run(contentDir string, force bool) (Result, bool, error) {
 		if fi, err := os.Stat(runPath); err != nil || !fi.Mode().IsRegular() {
 			continue // a directory without a run file is not a check
 		} else if fi.Mode().Perm()&0o111 == 0 {
-			record(name, Check{Err: "run is not executable — `chmod +x` it"}, false)
+			record(name, Check{Err: "run is not executable — `chmod +x` it"}, false, false)
 			continue
 		}
 		runBytes, err := os.ReadFile(runPath)
 		if err != nil {
-			record(name, Check{Err: err.Error()}, false)
+			record(name, Check{Err: err.Error()}, false, false)
 			continue
 		}
 		manifest, _ := os.ReadFile(filepath.Join(dir, "inputs"))
 
 		// Resolve inputs (the http provider may fetch). A resolution failure —
 		// missing file, 404 — is the check's error.
-		inputs, rerr := resolveInputs(parseInputs(manifest), contentDir, force)
+		inputs, rerr := resolveInputs(parseInputs(manifest), contentDir, opts.Force)
 		if rerr != "" {
-			record(name, Check{Err: rerr}, false)
+			record(name, Check{Err: rerr}, false, false)
 			continue
 		}
 
 		key := computeKey(runBytes, manifest, inputs)
-		if c, ok := cache[name]; ok && c.Key == key && !force {
-			record(name, c.Check, true)
+		if c, ok := cache[name]; ok && c.Key == key && !opts.Force {
+			if c.Check.Err == "" {
+				fresh[name] = attestation{Key: key, Output: c.Check.Output}
+			}
+			record(name, c.Check, true, false)
+			continue
+		}
+		if a, ok := atts[name]; ok && a.Key == key && !opts.Force {
+			ck := Check{Output: a.Output}
+			cache[name] = cachedUnit{Key: key, Check: ck}
+			fresh[name] = a
+			record(name, ck, false, true)
+			continue
+		}
+		if opts.Trust {
+			record(name, Check{Err: "no valid attestation (the run script or an input changed since the last local verify) — run `starbase verify` locally and commit evidence/attestations.json"}, false, false)
 			continue
 		}
 
 		out, runErr := runStaged(runPath, inputs)
 		ck := Check{Output: out, Err: runErr}
 		cache[name] = cachedUnit{Key: key, Check: ck}
-		record(name, ck, false)
+		if runErr == "" {
+			fresh[name] = attestation{Key: key, Output: out}
+		}
+		record(name, ck, false, false)
 	}
 	saveCache(contentDir, cache)
+	if !opts.Trust {
+		// A check that failed this run keeps its old attestation (a stale key
+		// never matches, and a transient failure shouldn't erase the record);
+		// checks that no longer exist are pruned.
+		for name, a := range atts {
+			if ck, ok := res.Checks[name]; ok && ck.Err != "" {
+				if _, set := fresh[name]; !set {
+					fresh[name] = a
+				}
+			}
+		}
+		saveAttestations(contentDir, atts, fresh)
+	}
 	return res, true, nil
 }
 
@@ -203,6 +252,60 @@ func execScript(path, cwd string) (stdout, errMsg string) {
 		return out.String(), msg
 	}
 	return out.String(), ""
+}
+
+// --- attestations (repo-committed record of executed results) ---
+
+// attestation is one check's recorded result: the content key it was computed
+// under (run script + inputs manifest + resolved input content) and its output.
+type attestation struct {
+	Key    string `json:"key"`
+	Output string `json:"output"`
+}
+
+// AttestationsFile is the repo-relative path (under the content dir) of the
+// committed attestation record.
+const AttestationsFile = "evidence/attestations.json"
+
+func attestationsPath(contentDir string) string {
+	return filepath.Join(contentDir, filepath.FromSlash(AttestationsFile))
+}
+
+func loadAttestations(contentDir string) map[string]attestation {
+	b, err := os.ReadFile(attestationsPath(contentDir))
+	if err != nil {
+		return map[string]attestation{}
+	}
+	var m map[string]attestation
+	if json.Unmarshal(b, &m) != nil || m == nil {
+		return map[string]attestation{}
+	}
+	return m
+}
+
+// saveAttestations writes the rebuilt attestation set, but only when it differs
+// from what was loaded — so a no-op verify doesn't dirty the repo.
+func saveAttestations(contentDir string, old, fresh map[string]attestation) {
+	if len(fresh) == 0 && len(old) == 0 {
+		return
+	}
+	same := len(old) == len(fresh)
+	if same {
+		for k, v := range fresh {
+			if old[k] != v {
+				same = false
+				break
+			}
+		}
+	}
+	if same {
+		return
+	}
+	b, err := json.MarshalIndent(fresh, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(attestationsPath(contentDir), append(b, '\n'), 0o644)
 }
 
 // --- persisted cache (user cache dir; CI starts cold) ---

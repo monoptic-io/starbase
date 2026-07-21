@@ -100,6 +100,9 @@ Beyond $r_\infty$ lies the chaotic regime, shot through with narrow periodic **w
 
 The depth of Feigenbaum's discovery is that $\delta$ does not depend on the logistic map at all. Any smooth one-dimensional map with a single quadratic hump — $\sin$, a cubic, a tent rounded at the tip — period-doubles its way to chaos with the *same* δ and the *same* spatial scaling constant $\alpha\approx2.5029$. The explanation is a **renormalization** argument borrowed from statistical physics: zoom in on the map near its peak after each doubling and rescale, and the rescaled maps converge to a fixed shape, a fixed point of a "doubling operator." δ is simply the rate at which that operator stretches parameter space — an eigenvalue, blind to which particular map you started from. That is why a [[Bifurcation|bifurcation]] cascade in a dripping tap and one in the [[Logistic Map]] share a digit-for-digit constant.
 
+For all this precision, δ's basic arithmetic nature is unknown — see the open
+problem [[Is the Feigenbaum Constant Transcendental?]].
+
 ## See also
 
 - [[Logistic Map]]

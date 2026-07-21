@@ -54,6 +54,7 @@
           <div class="sg-meta">
             {{- if .ReadingTime }}<span title="{{ .WordCount }} words">{{ .ReadingTime }} min read</span>{{ end }}
             {{- range .Tags }}<a class="sg-tag" href="{{ $.RootRel }}tags/{{ . | slugify }}.html">#{{ . }}</a>{{ end }}
+            {{- range .Labels }}<a class="sg-tag sg-label" href="{{ $.RootRel }}labels/{{ . | slugify }}.html">⚑ {{ . }}</a>{{ end }}
           </div>
           {{- if .Summary }}<p class="sg-summary">{{ .Summary }}</p>{{ end }}
         </header>

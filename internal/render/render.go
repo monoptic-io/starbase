@@ -87,6 +87,7 @@ type pageData struct {
 	RootRel     string
 	Breadcrumbs []crumb
 	Tags        []string
+	Labels      []string
 	WordCount   int
 	ReadingTime int
 	ShowTOC     bool
@@ -160,6 +161,7 @@ func (r *Renderer) Page(t *model.Topic) ([]byte, []model.Diagnostic) {
 		RootRel:     rootRel(t.OutPath),
 		Breadcrumbs: r.breadcrumbs(t),
 		Tags:        t.Tags,
+		Labels:      t.Labels,
 		WordCount:   t.WordCount,
 		ReadingTime: (t.WordCount + 199) / 200,
 		ShowTOC:     len(toc) >= 3,

@@ -31,7 +31,7 @@ jobs:
       - name: Validate demo site (no render)
         run: go run ./cmd/starbase check demo -strict
 
-      - name: Verify evidence-backed claims (re-runs the evidence checks)
+      - name: Verify evidence-backed claims (against committed attestations; nothing executes)
         run: |
-          go run ./cmd/starbase verify examples/sales-research
-          go run ./cmd/starbase verify demo
+          go run ./cmd/starbase verify -trust examples/sales-research
+          go run ./cmd/starbase verify -trust demo
