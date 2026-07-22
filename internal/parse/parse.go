@@ -21,7 +21,11 @@ import (
 )
 
 var (
-	reWikiLink   = regexp.MustCompile(`\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]`)
+	// Targets and displays may soft-wrap across one newline (markdown reflows
+	// it to a space); extractLinks rejects matches spanning a blank line.
+	// `[` is excluded so an unclosed `[[` can't bridge into the next link.
+	reWikiLink   = regexp.MustCompile(`\[\[([^\][|]+)(?:\|([^\][]+))?\]\]`)
+	reBlankLine  = regexp.MustCompile(`\n[ \t]*\n`)
 	reTag        = regexp.MustCompile(`\{\{<\s*(/?)\s*([\w-]+)((?:[^>]|>(?:[^}]|$))*?)(/?)>\}\}`)
 	reArg        = regexp.MustCompile(`([\w-]+)\s*=\s*("([^"]*)"|'([^']*)'|(\S+))`)
 	reH1         = regexp.MustCompile(`(?m)^#{1}\s+(.+?)\s*$`)
@@ -113,10 +117,13 @@ func ScanShortcodes(s string) []model.Shortcode {
 func extractLinks(masked, orig, rel string) []model.Link {
 	var links []model.Link
 	for _, loc := range reWikiLink.FindAllStringSubmatchIndex(masked, -1) {
-		target := strings.TrimSpace(orig[loc[2]:loc[3]])
+		if reBlankLine.MatchString(orig[loc[0]:loc[1]]) {
+			continue // a paragraph break inside [[...]] is not a link
+		}
+		target := normSpace(orig[loc[2]:loc[3]])
 		display := ""
 		if loc[4] >= 0 {
-			display = strings.TrimSpace(orig[loc[4]:loc[5]])
+			display = normSpace(orig[loc[4]:loc[5]])
 		}
 		links = append(links, model.Link{
 			Target:  target,
@@ -127,6 +134,40 @@ func extractLinks(masked, orig, rel string) []model.Link {
 		})
 	}
 	return links
+}
+
+// normSpace collapses runs of whitespace (including a soft line wrap) to
+// single spaces and trims, so `[[Verification\nMethodology]]` resolves like
+// `[[Verification Methodology]]`.
+func normSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+var reMdLink = regexp.MustCompile(`\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
+
+// ScanAssetRefs returns the targets of standard markdown links that point at
+// files rather than the web: relative URLs with no scheme, not starting with
+// `/`, `#`, or a protocol-ish prefix. Fragments and queries are stripped.
+// Code spans and fences are masked, like ScanLinks.
+func ScanAssetRefs(s string) []model.Link {
+	masked := maskCode(s)
+	var refs []model.Link
+	for _, loc := range reMdLink.FindAllStringSubmatchIndex(masked, -1) {
+		url := s[loc[2]:loc[3]] // offsets in masked are valid in s: masking preserves length
+		if strings.Contains(url, "://") || strings.HasPrefix(url, "/") ||
+			strings.HasPrefix(url, "#") || strings.HasPrefix(url, "mailto:") ||
+			strings.HasPrefix(url, "data:") || strings.HasPrefix(url, "tel:") {
+			continue
+		}
+		if i := strings.IndexAny(url, "#?"); i >= 0 {
+			url = url[:i]
+		}
+		if url == "" {
+			continue
+		}
+		refs = append(refs, model.Link{Target: url, Line: lineOf(masked, loc[0]), Start: loc[0], End: loc[1]})
+	}
+	return refs
 }
 
 // extractShortcodes tokenizes shortcode tags and pairs them with a stack, the

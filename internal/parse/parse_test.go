@@ -119,3 +119,24 @@ func names(cs []model.Shortcode) []string {
 	return out
 }
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestWrappedWikiLink(t *testing.T) {
+	body := "see ([[Verification\nMethodology]]) and [[Long\nName|the\ndisplay]].\n\nnot [[a\n\nparagraph]] link\n"
+	links := ScanLinks(body)
+	if len(links) != 2 {
+		t.Fatalf("want 2 links, got %d: %+v", len(links), links)
+	}
+	if links[0].Target != "Verification Methodology" {
+		t.Errorf("target = %q", links[0].Target)
+	}
+	if links[1].Target != "Long Name" || links[1].Display != "the display" {
+		t.Errorf("target/display = %q / %q", links[1].Target, links[1].Display)
+	}
+}
+
+func TestUnclosedLinkDoesNotBridge(t *testing.T) {
+	links := ScanLinks("broken [[x and later [[Real]] link\n")
+	if len(links) != 1 || links[0].Target != "Real" {
+		t.Fatalf("want just Real, got %+v", links)
+	}
+}

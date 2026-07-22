@@ -106,7 +106,7 @@ func (r Result) Warnings() (n int) {
 }
 
 var ignoredDirs = map[string]bool{
-	"templates": true, "theme": true, "layout": true,
+	"templates": true, "theme": true, "layout": true, "evidence": true,
 	"node_modules": true, "_site": true, "dist": true,
 }
 
@@ -149,6 +149,7 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 	diags = append(diags, reg.ResolveLinks(topics)...)
 
 	for _, t := range topics {
+		diags = append(diags, validateAssetRefs(cfg, t)...)
 		for _, sc := range t.Shortcodes {
 			switch sc.Name {
 			case "claim":
@@ -164,6 +165,41 @@ func index(cfg Config) ([]*model.Topic, *registry.Registry, *tmpl.Engine, []mode
 		}
 	}
 	return topics, reg, eng, diags, nil
+}
+
+// validateAssetRefs checks every relative markdown link in a topic against the
+// files the build will actually publish, so a dangling `[log](data/x.log)` is
+// a warning at check time instead of a silent 404 on the site.
+func validateAssetRefs(cfg Config, t *model.Topic) []model.Diagnostic {
+	var diags []model.Diagnostic
+	warn := func(line int, msg string, args ...any) {
+		diags = append(diags, model.Diagnostic{Severity: model.SevWarn,
+			File: t.SourcePath, Line: line, Message: fmt.Sprintf(msg, args...)})
+	}
+	baseDir := path.Dir(t.SourcePath)
+	for _, ref := range parse.ScanAssetRefs(t.Body) {
+		rel := path.Clean(path.Join(baseDir, ref.Target))
+		if rel == ".." || strings.HasPrefix(rel, "../") {
+			warn(ref.Line, "relative link %q points outside the content dir and will not be published", ref.Target)
+			continue
+		}
+		abs := filepath.Join(cfg.ContentDir, filepath.FromSlash(rel))
+		if !fileExists(abs) {
+			warn(ref.Line, "relative link %q does not resolve to a file under the content dir", ref.Target)
+			continue
+		}
+		if strings.HasSuffix(rel, ".md") {
+			warn(ref.Line, "relative link %q targets a topic source file; use a [[wiki link]] so it resolves to the rendered page", ref.Target)
+			continue
+		}
+		for _, seg := range strings.Split(rel, "/") {
+			if strings.HasPrefix(seg, ".") || strings.HasPrefix(seg, "_") || ignoredDirs[seg] {
+				warn(ref.Line, "relative link %q targets a directory the build does not publish (%s)", ref.Target, seg)
+				break
+			}
+		}
+	}
+	return diags
 }
 
 // Catalog returns the available template catalog (built-in plus project
@@ -420,6 +456,8 @@ func Build(cfg Config) (Result, error) {
 	if err := os.MkdirAll(cfg.OutDir, 0o755); err != nil {
 		return Result{}, err
 	}
+	_, aDiags := copyAssets(cfg)
+	diags = append(diags, aDiags...)
 	c := cache.New()
 	if !cfg.Force {
 		c = cache.Load(cfg.OutDir)
@@ -1001,6 +1039,63 @@ func collectMarkdown(cfg Config) ([]string, error) {
 	})
 	sort.Strings(files)
 	return files, err
+}
+
+// copyAssets mirrors non-markdown files from the content dir into the output,
+// preserving relative paths, so pages can link committed artifacts (logs,
+// images, data files) with plain relative markdown links. The skip rules match
+// collectMarkdown (hidden/underscore entries, ignoredDirs — including
+// evidence/, which is the build's input, not the site's output). A file is
+// rewritten only when its size or mtime differs. Returns the number copied.
+func copyAssets(cfg Config) (int, []model.Diagnostic) {
+	var diags []model.Diagnostic
+	copied := 0
+	root := cfg.ContentDir
+	absOut, _ := filepath.Abs(cfg.OutDir)
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if p != root && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || ignoredDirs[name]) {
+				return filepath.SkipDir
+			}
+			if abs, _ := filepath.Abs(p); abs == absOut {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(name, ".md") || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		dst := filepath.Join(cfg.OutDir, rel)
+		si, err := os.Stat(p)
+		if err != nil {
+			return err
+		}
+		if di, err := os.Stat(dst); err == nil && di.Size() == si.Size() && di.ModTime().Equal(si.ModTime()) {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(dst, b); err != nil {
+			return err
+		}
+		if err := os.Chtimes(dst, si.ModTime(), si.ModTime()); err != nil {
+			return err
+		}
+		copied++
+		return nil
+	})
+	if err != nil {
+		diags = append(diags, model.Diagnostic{Severity: model.SevWarn, File: ".",
+			Message: fmt.Sprintf("copying page assets: %s", err)})
+	}
+	return copied, diags
 }
 
 func writeFile(p string, content []byte) error {
